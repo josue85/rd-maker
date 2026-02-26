@@ -1,24 +1,9 @@
 import { google } from 'googleapis';
 
-// Ensure your .env.local has GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY
-// The private key should be formatted correctly (replace actual newlines with \n in the env string)
-
-export async function getGoogleDocsClient() {
-  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-    throw new Error("Google Service Account credentials are missing.");
-  }
-
-  // Handle formatted private key strings from .env
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
-
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: privateKey,
-    },
-    scopes: ['https://www.googleapis.com/auth/documents.readonly'],
-  });
-
+export function getGoogleDocsClient(accessToken: string) {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+  
   const docs = google.docs({ version: 'v1', auth });
   return docs;
 }

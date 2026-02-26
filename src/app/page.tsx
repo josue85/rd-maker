@@ -9,8 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { WorksheetData } from "@/types/worksheet";
+import { useSession, signIn, signOut } from "next-auth/react";
 
 export default function Home() {
+  const { data: session, status } = useSession();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<WorksheetData | null>(null);
 
@@ -150,11 +152,35 @@ ${result.economicRisk || 'N/A'}
                 </Button>
              </div>
           )}
+          {session && (
+            <Button variant="ghost" onClick={() => signOut()} className="text-white hover:bg-primary/50">
+              Sign Out
+            </Button>
+          )}
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-8 py-8 space-y-8">
-        {!result ? (
+        {status === "loading" ? (
+           <div className="flex justify-center pt-20">
+             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+           </div>
+        ) : !session ? (
+          <div className="flex items-center justify-center pt-20 animate-in fade-in duration-500">
+            <Card className="max-w-md w-full p-8 text-center space-y-6 shadow-lg border-t-4 border-t-primary">
+              <div className="mx-auto flex justify-center pb-4">
+                <Image src="/enova-logo.svg" alt="Enova" width={140} height={40} className="filter invert brightness-0" />
+              </div>
+              <h2 className="text-2xl font-bold text-[#333333]">Sign In Required</h2>
+              <p className="text-muted-foreground text-sm">
+                Please sign in with your Enova Google account to allow the application to securely read your SOW/BRD documents.
+              </p>
+              <Button onClick={() => signIn('google')} className="w-full bg-[#95ca53] hover:bg-[#86b54a] text-white py-6 text-lg font-semibold shadow-md">
+                Sign in with Google
+              </Button>
+            </Card>
+          </div>
+        ) : !result ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 mt-8">
             <div className="bg-white p-6 border border-border rounded-lg shadow-sm">
               <h2 className="text-xl font-semibold text-primary mb-2">Automate Your R&D Documentation</h2>

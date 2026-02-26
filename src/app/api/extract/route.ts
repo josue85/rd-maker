@@ -4,6 +4,8 @@ import { WorksheetData } from "@/types/worksheet";
 import { getJiraClient, extractJiraKey } from "@/lib/jira";
 import { fetchJiraEpicData, JiraIssueData } from "@/lib/jira-utils";
 import { getGoogleDocsClient, extractGoogleDocId, fetchGoogleDocText } from "@/lib/google-docs";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -54,6 +56,11 @@ const schema = {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session || !session.accessToken) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in with Google." }, { status: 401 });
+    }
+
     const { jiraUrls, wikiUrls, sowUrl } = await req.json();
 
     let jiraContext = "No Jira data provided.";
@@ -64,12 +71,12 @@ export async function POST(req: NextRequest) {
       const docId = extractGoogleDocId(sowUrl);
       if (docId) {
         try {
-          const docsClient = await getGoogleDocsClient();
+          const docsClient = getGoogleDocsClient(session.accessToken);
           sowText = await fetchGoogleDocText(docsClient, docId);
           console.log(`Successfully fetched SOW text from Google Doc: ${docId}, length: ${sowText.length} chars`);
         } catch (docsError: any) {
           console.warn("Failed to fetch Google Doc data:", docsError.message);
-          sowText = `Attempted to fetch Google Doc but failed: ${docsError.message}.`;
+          sowText = `Attempted to fetch Google Doc but failed: ${docsError.message}. Make sure you have given yourself view access to the document.`;
         }
       } else {
         sowText = `Invalid Google Doc URL provided: ${sowUrl}`;
