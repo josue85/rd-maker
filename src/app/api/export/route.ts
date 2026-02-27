@@ -3,7 +3,6 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getGoogleDriveClient, getGoogleDocsClient, copyGoogleDocAndReplace } from "@/lib/google-docs";
 import { extractGoogleDocId } from "@/lib/google-docs";
-import removeMd from "remove-markdown";
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,9 +24,18 @@ export async function POST(req: NextRequest) {
     const newTitle = `CapEx_RnD_Worksheet_${dateStr}`;
 
     const cleanMd = (text: string | undefined | null) => {
-        if (!text) return 'N/A';
-        // Strip markdown to make it plain text for Google Docs find/replace
-        return removeMd(text);
+      if (!text) return 'N/A';
+      
+      // Convert Markdown links [Text](url) to "Text (url)" so links aren't lost
+      let clean = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+      
+      // Remove bold/italic markdown indicators
+      clean = clean.replace(/\*\*/g, '').replace(/\*/g, '');
+      
+      // Convert raw markdown bullets to a nice text bullet character
+      clean = clean.replace(/^-\s+/gm, '• ');
+      
+      return clean.trim() || 'N/A';
     };
 
     // Map our state data to the placeholders in the document
