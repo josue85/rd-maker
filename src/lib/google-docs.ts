@@ -8,6 +8,14 @@ export function getGoogleDocsClient(accessToken: string) {
   return docs;
 }
 
+export function getGoogleDriveClient(accessToken: string) {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+  
+  const drive = google.drive({ version: 'v3', auth });
+  return drive;
+}
+
 export function extractGoogleDocId(url: string): string | null {
   // Matches the ID between /d/ and /edit or end of string
   const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
@@ -37,5 +45,29 @@ export async function fetchGoogleDocText(docsClient: any, documentId: string): P
   } catch (error) {
     console.error(`Error fetching Google Doc ${documentId}:`, error);
     throw new Error(`Failed to fetch Google Doc ${documentId}`);
+  }
+}
+
+export async function createGoogleDocFromHtml(driveClient: any, title: string, htmlContent: string): Promise<string> {
+  try {
+    const fileMetadata = {
+      name: title,
+      mimeType: 'application/vnd.google-apps.document',
+    };
+    const media = {
+      mimeType: 'text/html',
+      body: htmlContent,
+    };
+
+    const res = await driveClient.files.create({
+      requestBody: fileMetadata,
+      media: media,
+      fields: 'id, webViewLink',
+    });
+
+    return res.data.webViewLink as string;
+  } catch (error) {
+    console.error('Error creating Google Doc:', error);
+    throw new Error('Failed to create Google Doc');
   }
 }

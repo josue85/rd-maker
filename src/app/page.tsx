@@ -25,6 +25,7 @@ export default function Home() {
       jiraUrls: formData.get("jiraUrls") as string,
       wikiUrls: formData.get("wikiUrls") as string,
       sowUrl: formData.get("sowUrl") as string,
+      brdUrl: formData.get("brdUrl") as string,
     };
 
     try {
@@ -54,75 +55,34 @@ export default function Home() {
     }
   };
 
-  const handleExport = () => {
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
     if (!result) return;
-    
-    // Simple markdown export generation
-    const markdown = `# Capital Expenditure Research And Development Worksheet
+    setExporting(true);
+    try {
+      const response = await fetch("/api/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(result),
+      });
 
-## Project Information
-**Wiki**: ${result.wikiLink || 'N/A'}
-**Epic**: ${result.epicLink || 'N/A'}
-**SoW**: ${result.sowLink || 'N/A'}
-**BRD**: ${result.brdLink || 'N/A'}
-**SMEs**: ${result.smes || 'N/A'}
-**Team Lead / Manager**: ${result.teamLead || 'N/A'}
+      if (!response.ok) {
+        throw new Error("Failed to export document");
+      }
 
-### Description of Project
-${result.description || 'N/A'}
-
-### Business Objective
-${result.businessObjective || 'N/A'}
-
-## R&D Information
-**What percentage of the project was new work vs updating existing work?**
-New: ${result.newWorkPercentage || '0%'}, Updating: ${result.updatingPercentage || '0%'}
-
-**What Percentage of project work was research / learning versus development?**
-Research and Learning: ${result.researchLearningPercentage || '0%'}, Development: ${result.developmentPercentage || '0%'}
-
-**What kind of things were researched and/or new learnings?**
-${result.researchedLearnings || 'N/A'}
-
-**During the course of this project, what challenges did you face and what solutions did you use to overcome those challenges?**
-${result.challengesSolutions || 'N/A'}
-
-**Which technologies were used for this work:**
-${result.technologiesUsed || 'N/A'}
-
-### What code optimizations were done for this epic?
-${result.codeOptimizations || 'N/A'}
-
-### Which processes of experimentation were done for this epic?
-${result.processesOfExperimentation || 'N/A'}
-
-### Elimination of uncertainty
-**What business uncertainties were solved during this work?**
-${result.businessUncertaintiesSolved || 'N/A'}
-
-**What technical or solutioning uncertainty did we have and how did we overcome it?**
-${result.technicalUncertaintiesSolved || 'N/A'}
-
-### IS THIS INTERNAL USE SOFTWARE: ${result.isInternalUseSoftware ? 'Yes' : 'No'}
-**Is this component commercially available?**
-${result.commerciallyAvailable || 'N/A'}
-
-**Did the project reduce cost, improve speed and/or have any other measurable improvement?**
-${result.reducedCostSpeed || 'N/A'}
-
-**Did the project pose a significant economic risk test?**
-${result.economicRisk || 'N/A'}
-`;
-
-    const blob = new Blob([markdown], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Capex_RnD_Worksheet_${new Date().toISOString().split('T')[0]}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+      const { url } = await response.json();
+      const newWindow = window.open(url, "_blank");
+      if (!newWindow) {
+        // Fallback if popup blocker prevented the new window
+        window.location.assign(url);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("An error occurred while exporting the document.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -147,8 +107,8 @@ ${result.economicRisk || 'N/A'}
                 <Button variant="outline" onClick={() => setResult(null)} className="text-primary border-primary bg-white hover:bg-primary/5">
                   Start Over
                 </Button>
-                <Button onClick={handleExport} className="bg-[#95ca53] hover:bg-[#86b54a] text-white shadow-md font-semibold">
-                  Export Markdown
+                <Button onClick={handleExport} disabled={exporting} className="bg-[#95ca53] hover:bg-[#86b54a] text-white shadow-md font-semibold">
+                  {exporting ? "Exporting..." : "Export to Google Doc"}
                 </Button>
              </div>
           )}
@@ -209,14 +169,24 @@ ${result.economicRisk || 'N/A'}
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="sowUrl" className="text-sm font-semibold text-gray-700">Google Doc Link (SOW or BRD)</Label>
+                    <Label htmlFor="sowUrl" className="text-sm font-semibold text-gray-700">Google Doc Link (SOW)</Label>
                     <Input
                       id="sowUrl"
                       name="sowUrl"
                       placeholder="https://docs.google.com/document/d/1Tn5_..."
                       className="border-input focus:border-primary focus:ring-primary/20"
                     />
-                    <p className="text-xs text-muted-foreground">Make sure the Google Service Account has Viewer access to this document.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="brdUrl" className="text-sm font-semibold text-gray-700">Google Doc Link (BRD)</Label>
+                    <Input
+                      id="brdUrl"
+                      name="brdUrl"
+                      placeholder="https://docs.google.com/document/d/1Tn5_..."
+                      className="border-input focus:border-primary focus:ring-primary/20"
+                    />
+                    <p className="text-xs text-muted-foreground">Make sure you have Viewer access to these documents.</p>
                   </div>
 
                   <div className="space-y-2">
@@ -403,8 +373,8 @@ ${result.economicRisk || 'N/A'}
             </Card>
 
             <div className="flex justify-end pt-4 pb-12">
-               <Button onClick={handleExport} size="lg" className="bg-[#95ca53] hover:bg-[#86b54a] text-white shadow-md text-lg px-8">
-                  Export Final Markdown
+               <Button onClick={handleExport} disabled={exporting} size="lg" className="bg-[#95ca53] hover:bg-[#86b54a] text-white shadow-md text-lg px-8">
+                  {exporting ? "Exporting..." : "Export Final to Google Doc"}
                </Button>
             </div>
           </div>

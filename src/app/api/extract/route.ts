@@ -61,12 +61,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized. Please sign in with Google." }, { status: 401 });
     }
 
-    const { jiraUrls, wikiUrls, sowUrl } = await req.json();
+    const { jiraUrls, wikiUrls, sowUrl, brdUrl } = await req.json();
 
     let jiraContext = "No Jira data provided.";
     let sowText = "No SOW text provided.";
+    let brdText = "No BRD text provided.";
 
-    // Process Google Doc URL if provided
+    // Process Google Doc URL (SOW) if provided
     if (sowUrl) {
       const docId = extractGoogleDocId(sowUrl);
       if (docId) {
@@ -75,11 +76,28 @@ export async function POST(req: NextRequest) {
           sowText = await fetchGoogleDocText(docsClient, docId);
           console.log(`Successfully fetched SOW text from Google Doc: ${docId}, length: ${sowText.length} chars`);
         } catch (docsError: any) {
-          console.warn("Failed to fetch Google Doc data:", docsError.message);
-          sowText = `Attempted to fetch Google Doc but failed: ${docsError.message}. Make sure you have given yourself view access to the document.`;
+          console.warn("Failed to fetch SOW Google Doc data:", docsError.message);
+          sowText = `Attempted to fetch SOW Doc but failed: ${docsError.message}.`;
         }
       } else {
-        sowText = `Invalid Google Doc URL provided: ${sowUrl}`;
+        sowText = `Invalid SOW URL provided: ${sowUrl}`;
+      }
+    }
+
+    // Process Google Doc URL (BRD) if provided
+    if (brdUrl) {
+      const docId = extractGoogleDocId(brdUrl);
+      if (docId) {
+        try {
+          const docsClient = getGoogleDocsClient(session.accessToken);
+          brdText = await fetchGoogleDocText(docsClient, docId);
+          console.log(`Successfully fetched BRD text from Google Doc: ${docId}, length: ${brdText.length} chars`);
+        } catch (docsError: any) {
+          console.warn("Failed to fetch BRD Google Doc data:", docsError.message);
+          brdText = `Attempted to fetch BRD Doc but failed: ${docsError.message}.`;
+        }
+      } else {
+        brdText = `Invalid BRD URL provided: ${brdUrl}`;
       }
     }
     
@@ -124,6 +142,7 @@ export async function POST(req: NextRequest) {
       4. Infer Experimentation/Uncertainties: Look for words like "Spike", "POC", "investigate", "evaluate", or "optimize". These prove technical uncertainty and experimentation.
       5. Percentages: If percentages are not explicitly stated, estimate them based on the ratio of "new feature" subtasks vs "bug/maintenance" subtasks. Default to 80/20 New/Updating and 20/80 Research/Dev if mostly building.
       6. Do NOT leave fields blank or say "Not provided in Wiki" if you can find the answer in the Jira data or SOW text. The Jira data is your primary source of truth.
+      7. The user provided an SOW URL (${sowUrl || 'None'}) and a BRD URL (${brdUrl || 'None'}). You MUST set 'sowLink' and 'brdLink' to exactly these values if provided.
 
       Here is the source material provided by the user:
       
@@ -134,10 +153,13 @@ export async function POST(req: NextRequest) {
       
       Wiki Project URLs: ${wikiUrls || "None provided"}
       
-      Statement of Work / Additional Context: 
+      Statement of Work: 
       ${sowText || "None provided"}
+      
+      Business Requirements Document:
+      ${brdText || "None provided"}
 
-      Extract the information based on the schema requirements.
+      Extract the information based on the schema requirements. Ensure that the R&D Information and Elimination of Uncertainty sections are formatted as rich markdown lists (bullet points) containing a blurb of collaborating information and citations (referencing specific sections or subtasks) for each point. For example: "- **Finding**: The blurb here (Citation: JIRA-123)."
     `;
 
     const response = await ai.models.generateContent({
