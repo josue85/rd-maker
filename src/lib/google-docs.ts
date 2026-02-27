@@ -92,6 +92,6 @@ export async function copyGoogleDocAndReplace(
     return newDocUrl;
   } catch (error: any) {
     console.error('Error copying and updating Google Doc:', error.message || error);
-    throw new Error('Failed to create Google Doc from template');
+    throw new Error(`Failed to create Google Doc from template: ${error.message}`);
   }
 }
