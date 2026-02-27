@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getGoogleDriveClient, getGoogleDocsClient, copyGoogleDocAndReplace } from "@/lib/google-docs";
 import { extractGoogleDocId } from "@/lib/google-docs";
+import removeMd from "remove-markdown";
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,6 +24,12 @@ export async function POST(req: NextRequest) {
     const dateStr = new Date().toISOString().split('T')[0];
     const newTitle = `CapEx_RnD_Worksheet_${dateStr}`;
 
+    const cleanMd = (text: string | undefined | null) => {
+        if (!text) return 'N/A';
+        // Strip markdown to make it plain text for Google Docs find/replace
+        return removeMd(text);
+    };
+
     // Map our state data to the placeholders in the document
     const replacements = {
       'Project Name': result.epicLink ? result.epicLink.split('/').pop() || 'Project' : 'Project',
@@ -33,15 +40,23 @@ export async function POST(req: NextRequest) {
       'Tech PIC': result.smes || 'N/A',
       'PM or Product Manger': 'N/A', // Could add this to UI later
       'SE manager': result.teamLead || 'N/A',
-      'Project Description': result.description || 'N/A',
-      'Business objectives': result.businessObjective || 'N/A',
-      'Code Optimizations': result.codeOptimizations || 'N/A',
-      'processes of experimentation': result.processesOfExperimentation || 'N/A',
-      'Bussiness Uncertainty': result.businessUncertaintiesSolved || 'N/A',
-      'Technical Uncertainty': result.technicalUncertaintiesSolved || 'N/A',
-      'Commercially Available': result.commerciallyAvailable || 'N/A',
-      'reduce cost, improve speed and/or have any other': result.reducedCostSpeed || 'N/A',
-      'Economic Risk': result.economicRisk || 'N/A',
+      'Project Description': cleanMd(result.description),
+      'Business objectives': cleanMd(result.businessObjective),
+      
+      // Fixed the missing mapping tags!
+      'New Work vs Updating': `New: ${result.newWorkPercentage || '0%'}, Updating: ${result.updatingPercentage || '0%'}`,
+      'Research and Learning vs Development': `Research/Learning: ${result.researchLearningPercentage || '0%'}, Development: ${result.developmentPercentage || '0%'}`,
+      'Researched and new learnings': cleanMd(result.researchedLearnings),
+      'Challenges': cleanMd(result.challengesSolutions),
+      'Technologies': cleanMd(result.technologiesUsed),
+
+      'Code Optimizations': cleanMd(result.codeOptimizations),
+      'processes of experimentation': cleanMd(result.processesOfExperimentation),
+      'Bussiness Uncertainty': cleanMd(result.businessUncertaintiesSolved),
+      'Technical Uncertainty': cleanMd(result.technicalUncertaintiesSolved),
+      'Commercially Available': cleanMd(result.commerciallyAvailable),
+      'reduce cost, improve speed and/or have any other': cleanMd(result.reducedCostSpeed),
+      'Economic Risk': cleanMd(result.economicRisk),
     };
 
     const docUrl = await copyGoogleDocAndReplace(
