@@ -48,26 +48,50 @@ export async function fetchGoogleDocText(docsClient: any, documentId: string): P
   }
 }
 
-export async function createGoogleDocFromHtml(driveClient: any, title: string, htmlContent: string): Promise<string> {
+export async function copyGoogleDocAndReplace(
+  driveClient: any, 
+  docsClient: any, 
+  templateId: string, 
+  newTitle: string, 
+  replacements: Record<string, string>
+): Promise<string> {
   try {
-    const fileMetadata = {
-      name: title,
-      mimeType: 'application/vnd.google-apps.document',
-    };
-    const media = {
-      mimeType: 'text/html',
-      body: htmlContent,
-    };
-
-    const res = await driveClient.files.create({
-      requestBody: fileMetadata,
-      media: media,
+    // 1. Copy the template document
+    const copyResponse = await driveClient.files.copy({
+      fileId: templateId,
+      requestBody: {
+        name: newTitle,
+      },
       fields: 'id, webViewLink',
     });
 
-    return res.data.webViewLink as string;
-  } catch (error) {
-    console.error('Error creating Google Doc:', error);
-    throw new Error('Failed to create Google Doc');
+    const newDocId = copyResponse.data.id;
+    const newDocUrl = copyResponse.data.webViewLink;
+
+    // 2. Prepare find-and-replace requests
+    const requests = Object.entries(replacements).map(([key, value]) => ({
+      replaceAllText: {
+        containsText: {
+          text: `{{${key}}}`,
+          matchCase: true,
+        },
+        replaceText: value || '',
+      }
+    }));
+
+    // 3. Execute the batch update
+    if (requests.length > 0) {
+      await docsClient.documents.batchUpdate({
+        documentId: newDocId,
+        requestBody: {
+          requests,
+        },
+      });
+    }
+
+    return newDocUrl;
+  } catch (error: any) {
+    console.error('Error copying and updating Google Doc:', error.message || error);
+    throw new Error('Failed to create Google Doc from template');
   }
 }

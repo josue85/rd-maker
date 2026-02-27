@@ -64,7 +64,7 @@ export default function Home() {
       const response = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(result),
+        body: JSON.stringify({ result, templateDocUrl: "" }), // Template is hardcoded in the backend for now
       });
 
       if (!response.ok) {
