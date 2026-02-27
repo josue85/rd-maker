@@ -54,9 +54,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ url: docUrl });
   } catch (error: any) {
-    console.error("Export API Error:", error);
+    console.error("Export API Error:", error.message || error);
     return NextResponse.json(
-      { error: "Failed to export document." },
+      { error: "Failed to export document.", details: error.message || String(error) },
       { status: 500 }
     );
   }

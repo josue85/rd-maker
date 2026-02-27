@@ -68,7 +68,8 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to export document");
+        const errorData = await response.json();
+        throw new Error(errorData.details || "Failed to export document");
       }
 
       const { url } = await response.json();
