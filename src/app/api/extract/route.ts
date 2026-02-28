@@ -36,6 +36,7 @@ const schema = {
     commerciallyAvailable: { type: Type.STRING },
     reducedCostSpeed: { type: Type.STRING },
     economicRisk: { type: Type.STRING },
+    lowConfidenceFields: { type: Type.ARRAY, items: { type: Type.STRING }, description: "An array of exact field names (keys) from this schema where you had to guess or felt there wasn't enough information." },
   },
   required: [
     "description",
@@ -64,187 +65,216 @@ export async function POST(req: NextRequest) {
 
     const { jiraUrls, wikiUrls, sowUrl, brdUrl, additionalFiles } = await req.json();
 
-    let jiraContext = "No Jira data provided.";
-    let sowText = "No SOW text provided.";
-    let brdText = "No BRD text provided.";
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendUpdate = (statusMsg: string) => {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ status: statusMsg })}\n\n`));
+        };
 
-    const driveClient = getGoogleDriveClient(session.accessToken as string);
-    const docsClient = getGoogleDocsClient(session.accessToken as string);
-
-    // Process Google Doc URL (SOW) if provided
-    if (sowUrl) {
-      const docId = extractGoogleDocId(sowUrl);
-      if (docId) {
         try {
-          const docsClient = getGoogleDocsClient(session.accessToken);
-          sowText = await fetchGoogleDocText(docsClient, docId);
-          console.log(`Successfully fetched SOW text from Google Doc: ${docId}, length: ${sowText.length} chars`);
-        } catch (docsError: any) {
-          console.warn("Failed to fetch SOW Google Doc data:", docsError.message);
-          sowText = `Attempted to fetch SOW Doc but failed: ${docsError.message}.`;
-        }
-      } else {
-        sowText = `Invalid SOW URL provided: ${sowUrl}`;
-      }
-    }
+          let jiraContext = "No Jira data provided.";
+          let sowText = "No SOW text provided.";
+          let brdText = "No BRD text provided.";
 
-    // Process Google Doc URL (BRD) if provided
-    if (brdUrl) {
-      const docId = extractGoogleDocId(brdUrl);
-      if (docId) {
-        try {
-          const docsClient = getGoogleDocsClient(session.accessToken);
-          brdText = await fetchGoogleDocText(docsClient, docId);
-          console.log(`Successfully fetched BRD text from Google Doc: ${docId}, length: ${brdText.length} chars`);
-        } catch (docsError: any) {
-          console.warn("Failed to fetch BRD Google Doc data:", docsError.message);
-          brdText = `Attempted to fetch BRD Doc but failed: ${docsError.message}.`;
-        }
-      } else {
-        brdText = `Invalid BRD URL provided: ${brdUrl}`;
-      }
-    }
-    
-    // Process Jira URLs if provided and env vars are set
-    if (jiraUrls && process.env.JIRA_DOMAIN && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN) {
-      try {
-        const jiraClient = getJiraClient();
-        const urls = jiraUrls.split(',').map((u: string) => u.trim());
-        const issuesData: JiraIssueData[] = [];
+          const driveClient = getGoogleDriveClient(session.accessToken as string);
+          const docsClient = getGoogleDocsClient(session.accessToken as string);
 
-        for (const url of urls) {
-          const key = extractJiraKey(url);
-          if (key) {
-             const data = await fetchJiraEpicData(jiraClient, key);
-             issuesData.push(data);
-          }
-        }
-        
-        if (issuesData.length > 0) {
-            jiraContext = "Jira Epic Data:\n" + issuesData.map(data => 
-                `Key: ${data.key}\nSummary: ${data.summary}\nDescription: ${data.description}\n` +
-                `Assignee: ${data.assignee || 'Unassigned'}\nReporter: ${data.reporter || 'Unassigned'}\n` +
-                `Labels: ${data.labels.join(', ')}\nComponents: ${data.components.join(', ')}\n` +
-                `Subtasks:\n${data.subtasks.map(st => `  - ${st.key}: ${st.summary} (${st.status})`).join('\n')}\n` +
-                `Linked/Child Issues:\n${data.linkedIssues?.map(li => `  - ${li.key}: ${li.summary} (${li.status})\n    Description: ${li.description}`).join('\n\n')}`
-            ).join("\n\n---\n\n");
-        }
-      } catch (jiraError: any) {
-        console.warn("Failed to fetch Jira data:", jiraError.message);
-        jiraContext = `Attempted to fetch Jira data but failed: ${jiraError.message}. Proceeding with just the URL.`;
-      }
-    }
-
-    const promptContext = `
-      You are an expert technical project manager, software architect, and tax credit analyst.
-      Your goal is to complete a CapEx R&D Tax Credit Worksheet as thoroughly as possible using ALL available context. 
-      You MUST infer and deduce answers from the provided Jira data, SOW text, and context. Do NOT simply say "Requires review" if the answer can be reasonably inferred from the technical descriptions, subtasks, or summaries.
-
-      CRITICAL INSTRUCTIONS FOR EXTRACTION:
-      1. USE BOTH JIRA AND SOW: You must actively synthesize information from BOTH the Jira Epic/child stories AND the SOW document. Do not rely solely on one. Extract the high-level goals from the SOW and the granular technical implementations/uncertainties from the Jira tickets. Cite both sources where applicable (e.g. "[SOW], [JIRA-123]").
-      2. Spikes = Experimentation: Specifically look for Jira stories labeled or titled "Spike", "POC", "investigate", "research", or "evaluate". These explicitly represent technical uncertainties and experimentation. Use them heavily to populate the "Technical Uncertainty" and "Experimentation" fields.
-      3. Infer Challenges & Solutions: Look at technical subtasks (e.g., "Refactor X", "Migrate Y", "Fix bug in Z"). These indicate technical challenges and the solutions applied. Cite the specific Jira keys.
-      4. Infer Technologies: Extract any mentioned programming languages, frameworks, databases, or cloud services from the text (e.g., React, AWS, Postgres, Ruby).
-      5. Percentages: If percentages are not explicitly stated, estimate them based on the ratio of "new feature" subtasks vs "bug/maintenance" subtasks. Default to 80/20 New/Updating and 20/80 Research/Dev if mostly building.
-      6. Do NOT leave fields blank or say "Not provided in Wiki" if you can find the answer in the Jira data or SOW text. 
-      7. The user provided an SOW URL (${sowUrl || 'None'}) and a BRD URL (${brdUrl || 'None'}). You MUST set 'sowLink' and 'brdLink' to exactly these values if provided.
-      8. Extract PICs (People In Charge / Points of Contact) from the BRD text and assign them to the \`smes\` field.
-      9. Project Name/Title: Extract the actual readable title of the project from the Epic Summary or the BRD/SOW headers. Do NOT just output the Epic ID (e.g., instead of "ZONKS-123", output "Customer Rebranding Project"). If both are available, combine them or use the most descriptive one.
-      10. ADDITIONAL FILES: You have also been provided with supporting documents, diagrams, and files in this prompt. Analyze these supplementary files for additional technical challenges, architectural shifts, and experimentation data. If you extract a fact from one of these files, cite it using its filename (e.g. "[Architecture_Diagram.png]").
-
-      Here is the source material provided by the user:
-      
-      Jira Epic URLs (User Input): ${jiraUrls || "None provided"}
-      
-      Extracted Jira Data (CRITICAL - USE THIS TO ANSWER QUESTIONS): 
-      ${jiraContext}
-      
-      Wiki Project URLs: ${wikiUrls || "None provided"}
-      
-      Statement of Work: 
-      ${sowText || "None provided"}
-      
-      Business Requirements Document:
-      ${brdText || "None provided"}
-
-      Extract the information based on the schema requirements. Ensure that the R&D Information and Elimination of Uncertainty sections are formatted as rich markdown lists (bullet points) containing a blurb of collaborating information and citations (referencing specific sections or subtasks) for each point.
-      
-      FORMATTING REQUIREMENTS:
-      - Consistently add exactly one blank line (empty line) between EVERY single bullet point in any markdown list you generate. Do not smash them together.
-      - New Learnings (\`researchedLearnings\`): Put an empty line (blank line) after each learning.
-      - Challenges (\`challengesSolutions\`): Format each challenge and solution EXACTLY like this (do NOT use bullet points for this section, use paragraphs):
-        **Challenge:** [Describe challenge here]
-
-        **Solution:** [Describe solution here]
-        
-        (Make sure there is a full blank line between the Challenge paragraph and the Solution paragraph, and another full blank line before the next Challenge begins.)
-      - Experimentation (\`processesOfExperimentation\`): Add an empty line after each experimentation.
-      - Citations: When adding citations, format them as markdown links back to the source doc where the information is coming from.
-        - For Jira: e.g. [JIRA-123](https://${process.env.JIRA_DOMAIN || 'your-domain.atlassian.net'}/browse/JIRA-123)
-        - For SOW: e.g. [SOW](${sowUrl || 'SOW'})
-        - For BRD: e.g. [BRD](${brdUrl || 'BRD'})
-        - For attached files: Mention the filename (e.g. "[Architecture_Diagram.png]")
-    `;
-
-    const promptParts: any[] = [{ text: promptContext }];
-
-    if (additionalFiles && Array.isArray(additionalFiles)) {
-      for (const file of additionalFiles) {
-        try {
-          if (file.isDrive) {
-            if (file.mimeType === 'application/vnd.google-apps.document') {
-              const fileText = await fetchGoogleDocText(docsClient, file.id);
-              promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${fileText}\n--- End of ${file.name} ---\n` });
-            } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
-              const res = await driveClient.files.export({ fileId: file.id, mimeType: 'text/csv' });
-              promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${res.data}\n--- End of ${file.name} ---\n` });
-            } else if (file.mimeType === 'application/vnd.google-apps.presentation') {
-              const res = await driveClient.files.export({ fileId: file.id, mimeType: 'text/plain' });
-              promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${res.data}\n--- End of ${file.name} ---\n` });
+          // Process Google Doc URL (SOW) if provided
+          if (sowUrl) {
+            sendUpdate("Reading SOW Document...");
+            const docId = extractGoogleDocId(sowUrl);
+            if (docId) {
+              try {
+                sowText = await fetchGoogleDocText(docsClient, docId);
+                console.log(`Successfully fetched SOW text from Google Doc: ${docId}, length: ${sowText.length} chars`);
+              } catch (docsError: any) {
+                console.warn("Failed to fetch SOW Google Doc data:", docsError.message);
+                sowText = `Attempted to fetch SOW Doc but failed: ${docsError.message}.`;
+              }
             } else {
-              // Try to download media (images, pdfs)
-              const res = await driveClient.files.get({ fileId: file.id, alt: 'media' }, { responseType: 'arraybuffer' });
-              const fileBase64 = Buffer.from(res.data as ArrayBuffer).toString('base64');
-              promptParts.push({ text: `\n\n--- Attached File: ${file.name} ---\n` });
-              promptParts.push({ inlineData: { data: fileBase64, mimeType: file.mimeType } });
+              sowText = `Invalid SOW URL provided: ${sowUrl}`;
             }
-          } else {
-            // Local file, should have base64
-            if (file.base64) {
-              const parts = file.base64.split(',');
-              if (parts.length === 2) {
-                promptParts.push({ text: `\n\n--- Attached File: ${file.name} ---\n` });
-                promptParts.push({ inlineData: { data: parts[1], mimeType: file.mimeType } });
+          }
+
+          // Process Google Doc URL (BRD) if provided
+          if (brdUrl) {
+            sendUpdate("Reading BRD Document...");
+            const docId = extractGoogleDocId(brdUrl);
+            if (docId) {
+              try {
+                brdText = await fetchGoogleDocText(docsClient, docId);
+                console.log(`Successfully fetched BRD text from Google Doc: ${docId}, length: ${brdText.length} chars`);
+              } catch (docsError: any) {
+                console.warn("Failed to fetch BRD Google Doc data:", docsError.message);
+                brdText = `Attempted to fetch BRD Doc but failed: ${docsError.message}.`;
+              }
+            } else {
+              brdText = `Invalid BRD URL provided: ${brdUrl}`;
+            }
+          }
+          
+          // Process Jira URLs if provided and env vars are set
+          if (jiraUrls && process.env.JIRA_DOMAIN && process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN) {
+            sendUpdate("Fetching Jira Epic & Stories...");
+            try {
+              const jiraClient = getJiraClient();
+              const urls = jiraUrls.split(',').map((u: string) => u.trim());
+              const issuesData: JiraIssueData[] = [];
+
+              for (const url of urls) {
+                const key = extractJiraKey(url);
+                if (key) {
+                   const data = await fetchJiraEpicData(jiraClient, key);
+                   issuesData.push(data);
+                }
+              }
+              
+              if (issuesData.length > 0) {
+                  jiraContext = "Jira Epic Data:\n" + issuesData.map(data => 
+                      `Key: ${data.key}\nSummary: ${data.summary}\nDescription: ${data.description}\n` +
+                      `Assignee: ${data.assignee || 'Unassigned'}\nReporter: ${data.reporter || 'Unassigned'}\n` +
+                      `Labels: ${data.labels.join(', ')}\nComponents: ${data.components.join(', ')}\n` +
+                      `Subtasks:\n${data.subtasks.map(st => `  - ${st.key}: ${st.summary} (${st.status})`).join('\n')}\n` +
+                      `Linked/Child Issues:\n${data.linkedIssues?.map(li => `  - ${li.key}: ${li.summary} (${li.status})\n    Description: ${li.description}`).join('\n\n')}`
+                  ).join("\n\n---\n\n");
+              }
+            } catch (jiraError: any) {
+              console.warn("Failed to fetch Jira data:", jiraError.message);
+              jiraContext = `Attempted to fetch Jira data but failed: ${jiraError.message}. Proceeding with just the URL.`;
+            }
+          }
+
+          const promptContext = `
+            You are an expert technical project manager, software architect, and tax credit analyst.
+            Your goal is to complete a CapEx R&D Tax Credit Worksheet as thoroughly as possible using ALL available context. 
+            You MUST infer and deduce answers from the provided Jira data, SOW text, and context. Do NOT simply say "Requires review" if the answer can be reasonably inferred from the technical descriptions, subtasks, or summaries.
+      
+            CRITICAL INSTRUCTIONS FOR EXTRACTION:
+            1. USE BOTH JIRA AND SOW: You must actively synthesize information from BOTH the Jira Epic/child stories AND the SOW document. Do not rely solely on one. Extract the high-level goals from the SOW and the granular technical implementations/uncertainties from the Jira tickets. Cite both sources where applicable (e.g. "[SOW], [JIRA-123]").
+            2. Spikes = Experimentation: Specifically look for Jira stories labeled or titled "Spike", "POC", "investigate", "research", or "evaluate". These explicitly represent technical uncertainties and experimentation. Use them heavily to populate the "Technical Uncertainty" and "Experimentation" fields.
+            3. Infer Challenges & Solutions: Look at technical subtasks (e.g., "Refactor X", "Migrate Y", "Fix bug in Z"). These indicate technical challenges and the solutions applied. Cite the specific Jira keys.
+            4. Infer Technologies: Extract any mentioned programming languages, frameworks, databases, or cloud services from the text (e.g., React, AWS, Postgres, Ruby).
+            5. Percentages: If percentages are not explicitly stated, estimate them based on the ratio of "new feature" subtasks vs "bug/maintenance" subtasks. Default to 80/20 New/Updating and 20/80 Research/Dev if mostly building.
+            6. Do NOT leave fields blank or say "Not provided in Wiki" if you can find the answer in the Jira data or SOW text. 
+            7. The user provided an SOW URL (${sowUrl || 'None'}) and a BRD URL (${brdUrl || 'None'}). You MUST set 'sowLink' and 'brdLink' to exactly these values if provided.
+            8. Extract PICs (People In Charge / Points of Contact) from the BRD text and assign them to the \`smes\` field.
+            9. Project Name/Title: Extract the actual readable title of the project from the Epic Summary or the BRD/SOW headers. Do NOT just output the Epic ID (e.g., instead of "ZONKS-123", output "Customer Rebranding Project"). If both are available, combine them or use the most descriptive one.
+            10. ADDITIONAL FILES: You have also been provided with supporting documents, diagrams, and files in this prompt. Analyze these supplementary files for additional technical challenges, architectural shifts, and experimentation data. If you extract a fact from one of these files, cite it using its filename (e.g. "[Architecture_Diagram.png]").
+            11. CONFIDENCE HIGHLIGHTING: If you have to guess an answer or if the provided text simply does not contain enough information to give a good answer for a specific field, add the EXACT JSON key of that field to the \`lowConfidenceFields\` array so the human user can review it.
+      
+            Here is the source material provided by the user:
+            
+            Jira Epic URLs (User Input): ${jiraUrls || "None provided"}
+            
+            Extracted Jira Data (CRITICAL - USE THIS TO ANSWER QUESTIONS): 
+            ${jiraContext}
+            
+            Wiki Project URLs: ${wikiUrls || "None provided"}
+            
+            Statement of Work: 
+            ${sowText || "None provided"}
+            
+            Business Requirements Document:
+            ${brdText || "None provided"}
+      
+            Extract the information based on the schema requirements. Ensure that the R&D Information and Elimination of Uncertainty sections are formatted as rich markdown lists (bullet points) containing a blurb of collaborating information and citations (referencing specific sections or subtasks) for each point.
+            
+            FORMATTING REQUIREMENTS:
+            - Consistently add exactly one blank line (empty line) between EVERY single bullet point in any markdown list you generate. Do not smash them together.
+            - New Learnings (\`researchedLearnings\`): Put an empty line (blank line) after each learning.
+            - Challenges (\`challengesSolutions\`): Format each challenge and solution EXACTLY like this (do NOT use bullet points for this section, use paragraphs):
+              **Challenge:** [Describe challenge here]
+      
+              **Solution:** [Describe solution here]
+              
+              (Make sure there is a full blank line between the Challenge paragraph and the Solution paragraph, and another full blank line before the next Challenge begins.)
+            - Experimentation (\`processesOfExperimentation\`): Add an empty line after each experimentation.
+            - Citations: When adding citations, format them as markdown links back to the source doc where the information is coming from.
+              - For Jira: e.g. [JIRA-123](https://${process.env.JIRA_DOMAIN || 'your-domain.atlassian.net'}/browse/JIRA-123)
+              - For SOW: e.g. [SOW](${sowUrl || 'SOW'})
+              - For BRD: e.g. [BRD](${brdUrl || 'BRD'})
+              - For attached files: Mention the filename (e.g. "[Architecture_Diagram.png]")
+          `;
+
+          const promptParts: any[] = [{ text: promptContext }];
+
+          if (additionalFiles && Array.isArray(additionalFiles) && additionalFiles.length > 0) {
+            sendUpdate("Processing Additional Files & Diagrams...");
+            for (const file of additionalFiles) {
+              try {
+                if (file.isDrive) {
+                  if (file.mimeType === 'application/vnd.google-apps.document') {
+                    const fileText = await fetchGoogleDocText(docsClient, file.id);
+                    promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${fileText}\n--- End of ${file.name} ---\n` });
+                  } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
+                    const res = await driveClient.files.export({ fileId: file.id, mimeType: 'text/csv' });
+                    promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${res.data}\n--- End of ${file.name} ---\n` });
+                  } else if (file.mimeType === 'application/vnd.google-apps.presentation') {
+                    const res = await driveClient.files.export({ fileId: file.id, mimeType: 'text/plain' });
+                    promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${res.data}\n--- End of ${file.name} ---\n` });
+                  } else {
+                    // Try to download media (images, pdfs)
+                    const res = await driveClient.files.get({ fileId: file.id, alt: 'media' }, { responseType: 'arraybuffer' });
+                    const fileBase64 = Buffer.from(res.data as ArrayBuffer).toString('base64');
+                    promptParts.push({ text: `\n\n--- Attached File: ${file.name} ---\n` });
+                    promptParts.push({ inlineData: { data: fileBase64, mimeType: file.mimeType } });
+                  }
+                } else {
+                  // Local file, should have base64
+                  if (file.base64) {
+                    const parts = file.base64.split(',');
+                    if (parts.length === 2) {
+                      promptParts.push({ text: `\n\n--- Attached File: ${file.name} ---\n` });
+                      promptParts.push({ inlineData: { data: parts[1], mimeType: file.mimeType } });
+                    }
+                  }
+                }
+              } catch (err: any) {
+                console.warn(`Failed to process additional file ${file.name}:`, err.message);
               }
             }
           }
-        } catch (err: any) {
-          console.warn(`Failed to process additional file ${file.name}:`, err.message);
+
+          sendUpdate("Analyzing Context & Drafting Worksheet...");
+          const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: promptParts,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: schema,
+              temperature: 0.2, // Slightly higher to allow inference
+            },
+          });
+
+          const text = response.text;
+          
+          if (!text) {
+              throw new Error("No response from AI")
+          }
+
+          const worksheetData: WorksheetData = JSON.parse(text);
+
+          // Send final payload
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ data: worksheetData })}\n\n`));
+          controller.close();
+        } catch (error: any) {
+          console.error("Extraction API Error:", error);
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: error.message || "Failed to process the request." })}\n\n`));
+          controller.close();
         }
       }
-    }
+    });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: promptParts,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
-        temperature: 0.2, // Slightly higher to allow inference
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
       },
     });
 
-    const text = response.text;
-    
-    if (!text) {
-        throw new Error("No response from AI")
-    }
-
-    const worksheetData: WorksheetData = JSON.parse(text);
-
-    return NextResponse.json({ data: worksheetData });
-  } catch (error) {
-    console.error("Extraction API Error:", error);
+  } catch (error: any) {
+    console.error("Extraction API Auth Error:", error);
     return NextResponse.json(
       { error: "Failed to process the request." },
       { status: 500 }

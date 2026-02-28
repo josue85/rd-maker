@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,8 @@ import { WorksheetData } from "@/types/worksheet";
 import { useSession, signIn, signOut } from "next-auth/react";
 import ReactMarkdown from "react-markdown";
 import useDrivePicker from "react-google-drive-picker";
-import { Trash2, File as FileIcon, Image as ImageIcon, FileText } from "lucide-react";
+import { Trash2, File as FileIcon, Image as ImageIcon, FileText, Bold, Italic, Link as LinkIcon, List, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 
 type AdditionalFile = {
   id: string;
@@ -23,12 +24,44 @@ type AdditionalFile = {
   isDrive: boolean;
 };
 
-const MarkdownEditor = ({ value, onChange, label, className = "h-32", placeholder = "" }: any) => {
+const MarkdownEditor = ({ value, onChange, label, className = "h-32", placeholder = "", isLowConfidence = false }: any) => {
   const [mode, setMode] = useState<"preview" | "edit">("preview");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const insertFormatting = (prefix: string, suffix: string = "") => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = value.substring(start, end);
+    const before = value.substring(0, start);
+    const after = value.substring(end);
+
+    const newText = before + prefix + selectedText + suffix + after;
+    onChange(newText);
+
+    // Set timeout to ensure React updates value before we change selection
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(
+        start + prefix.length,
+        end + prefix.length
+      );
+    }, 0);
+  };
+
   return (
-    <div className="space-y-2">
+    <div className={`space-y-2 rounded-lg p-2 transition-all ${isLowConfidence ? 'bg-amber-50 ring-2 ring-amber-300' : ''}`}>
       <div className="flex justify-between items-center">
-        <Label>{label}</Label>
+        <div className="flex items-center gap-2">
+          <Label className={isLowConfidence ? 'text-amber-800 font-semibold' : ''}>{label}</Label>
+          {isLowConfidence && (
+             <div className="flex items-center text-amber-600 text-xs bg-amber-100 px-2 py-0.5 rounded-full">
+                <AlertTriangle className="w-3 h-3 mr-1" /> Needs Review
+             </div>
+          )}
+        </div>
         <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-md border border-border">
           <button 
             type="button"
@@ -46,6 +79,25 @@ const MarkdownEditor = ({ value, onChange, label, className = "h-32", placeholde
           </button>
         </div>
       </div>
+      
+      {mode === "edit" && (
+        <div className="flex items-center gap-1 bg-slate-50 border border-b-0 border-input rounded-t-md p-1">
+          <button type="button" onClick={() => insertFormatting("**", "**")} className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded" title="Bold">
+            <Bold className="w-4 h-4" />
+          </button>
+          <button type="button" onClick={() => insertFormatting("*", "*")} className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded" title="Italic">
+            <Italic className="w-4 h-4" />
+          </button>
+          <div className="w-px h-4 bg-slate-300 mx-1"></div>
+          <button type="button" onClick={() => insertFormatting("- ")} className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded" title="Bullet List">
+            <List className="w-4 h-4" />
+          </button>
+          <button type="button" onClick={() => insertFormatting("[", "](url)")} className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded" title="Link">
+            <LinkIcon className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {mode === "preview" ? (
         <div className={`p-4 border border-input rounded-md bg-white overflow-y-auto min-h-[8rem] max-h-[30rem] ${className.replace('h-', 'min-h-')}`}>
           {value ? (
@@ -69,7 +121,7 @@ const MarkdownEditor = ({ value, onChange, label, className = "h-32", placeholde
           )}
         </div>
       ) : (
-        <Textarea className={`font-mono text-sm ${className}`} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+        <Textarea ref={textareaRef} className={`font-mono text-sm ${mode === 'edit' ? 'rounded-t-none' : ''} ${className}`} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
       )}
     </div>
   );
@@ -78,6 +130,7 @@ const MarkdownEditor = ({ value, onChange, label, className = "h-32", placeholde
 export default function Home() {
   const { data: session, status } = useSession();
   const [loading, setLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState("Analyzing Sources & Extracting Data...");
   const [result, setResult] = useState<WorksheetData | null>(null);
 
   // Form states for Picker population
@@ -87,6 +140,47 @@ export default function Home() {
   const [wikiUrls, setWikiUrls] = useState("");
   const [additionalFiles, setAdditionalFiles] = useState<AdditionalFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const savedDraft = localStorage.getItem("rdmaker_draft");
+    if (savedDraft) {
+      try {
+        const { result: savedResult, jiraUrls: savedJira, sowUrl: savedSow, brdUrl: savedBrd, wikiUrls: savedWiki } = JSON.parse(savedDraft);
+        if (savedResult) {
+           toast("Draft found", {
+             description: "We found an unsaved draft from your previous session.",
+             action: {
+               label: "Restore",
+               onClick: () => {
+                 setResult(savedResult);
+                 setJiraUrls(savedJira || "");
+                 setSowUrl(savedSow || "");
+                 setBrdUrl(savedBrd || "");
+                 setWikiUrls(savedWiki || "");
+               }
+             },
+             cancel: {
+               label: "Dismiss",
+               onClick: () => localStorage.removeItem("rdmaker_draft")
+             }
+           });
+        }
+      } catch (e) {
+        console.error("Failed to parse saved draft");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (result) {
+       localStorage.setItem("rdmaker_draft", JSON.stringify({ result, jiraUrls, sowUrl, brdUrl, wikiUrls }));
+    }
+  }, [result, jiraUrls, sowUrl, brdUrl, wikiUrls]);
+
+  const clearDraft = () => {
+     setResult(null);
+     localStorage.removeItem("rdmaker_draft");
+  };
 
   const [openPicker] = useDrivePicker();
 
@@ -176,6 +270,7 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
+    setLoadingStatus("Connecting to server...");
 
     const data = {
       jiraUrls,
@@ -196,13 +291,45 @@ export default function Home() {
         throw new Error("Failed to extract data");
       }
 
-      const extractedData = await response.json();
-      setResult(extractedData.data);
-    } catch (error) {
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response stream");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        
+        const chunks = buffer.split('\n\n');
+        buffer = chunks.pop() || "";
+        
+        for (const chunk of chunks) {
+           if (chunk.startsWith('data: ')) {
+              try {
+                const parsed = JSON.parse(chunk.slice(6));
+                if (parsed.status) {
+                   setLoadingStatus(parsed.status);
+                } else if (parsed.data) {
+                   setResult(parsed.data);
+                   toast.success("Draft Generated", { description: "Review and edit your worksheet below." });
+                } else if (parsed.error) {
+                   throw new Error(parsed.error);
+                }
+              } catch (e) {
+                 console.error("Error parsing stream chunk", e);
+              }
+           }
+        }
+      }
+    } catch (error: any) {
       console.error(error);
-      alert("An error occurred while processing the request.");
+      toast.error("Generation Failed", { description: error.message || "An error occurred while processing the request." });
     } finally {
       setLoading(false);
+      setLoadingStatus("Analyzing Sources & Extracting Data...");
     }
   };
 
@@ -213,6 +340,14 @@ export default function Home() {
   };
 
   const [exporting, setExporting] = useState(false);
+
+  const isLowConfidence = (field: keyof WorksheetData) => {
+    return result?.lowConfidenceFields?.includes(field) || false;
+  };
+
+  const getInputClassName = (field: keyof WorksheetData) => {
+    return isLowConfidence(field) ? "border-amber-300 ring-2 ring-amber-200 bg-amber-50" : "";
+  };
 
   const handleExport = async () => {
     if (!result) return;
@@ -236,7 +371,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error(error);
-      alert("An error occurred while exporting the document.");
+      toast.error("Export Failed", { description: "An error occurred while exporting the document." });
     } finally {
       setExporting(false);
     }
@@ -260,8 +395,8 @@ export default function Home() {
             </div>
           </div>
           {result && (
-             <div className="flex gap-4">
-                <Button variant="outline" onClick={() => setResult(null)} className="text-primary border-primary bg-white hover:bg-primary/5">
+              <div className="flex gap-4">
+                <Button variant="outline" onClick={clearDraft} className="text-primary border-primary bg-white hover:bg-primary/5">
                   Start Over
                 </Button>
                 <Button onClick={handleExport} disabled={exporting} className="bg-[#95ca53] hover:bg-[#86b54a] text-white shadow-md font-semibold">
@@ -431,7 +566,7 @@ export default function Home() {
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                           </svg>
-                          Analyzing Sources & Extracting Data...
+                          {loadingStatus}
                         </span>
                       ) : (
                         "Generate Worksheet Draft"
@@ -455,28 +590,28 @@ export default function Home() {
               <CardContent className="pt-6 space-y-8">
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <Label>Wiki Link</Label>
-                    <Input value={result.wikiLink || ''} onChange={(e) => handleInputChange('wikiLink', e.target.value)} />
+                    <Label className={isLowConfidence('wikiLink') ? 'text-amber-800 font-semibold' : ''}>Wiki Link</Label>
+                    <Input className={getInputClassName('wikiLink')} value={result.wikiLink || ''} onChange={(e) => handleInputChange('wikiLink', e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Epic Link</Label>
-                    <Input value={result.epicLink || ''} onChange={(e) => handleInputChange('epicLink', e.target.value)} />
+                    <Label className={isLowConfidence('epicLink') ? 'text-amber-800 font-semibold' : ''}>Epic Link</Label>
+                    <Input className={getInputClassName('epicLink')} value={result.epicLink || ''} onChange={(e) => handleInputChange('epicLink', e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>SoW Link</Label>
-                    <Input value={result.sowLink || ''} onChange={(e) => handleInputChange('sowLink', e.target.value)} />
+                    <Label className={isLowConfidence('sowLink') ? 'text-amber-800 font-semibold' : ''}>SoW Link</Label>
+                    <Input className={getInputClassName('sowLink')} value={result.sowLink || ''} onChange={(e) => handleInputChange('sowLink', e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>BRD Link</Label>
-                    <Input value={result.brdLink || ''} onChange={(e) => handleInputChange('brdLink', e.target.value)} />
+                    <Label className={isLowConfidence('brdLink') ? 'text-amber-800 font-semibold' : ''}>BRD Link</Label>
+                    <Input className={getInputClassName('brdLink')} value={result.brdLink || ''} onChange={(e) => handleInputChange('brdLink', e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>SMEs</Label>
-                    <Input value={result.smes || ''} onChange={(e) => handleInputChange('smes', e.target.value)} />
+                    <Label className={isLowConfidence('smes') ? 'text-amber-800 font-semibold' : ''}>SMEs</Label>
+                    <Input className={getInputClassName('smes')} value={result.smes || ''} onChange={(e) => handleInputChange('smes', e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Team Lead / Manager</Label>
-                    <Input value={result.teamLead || ''} onChange={(e) => handleInputChange('teamLead', e.target.value)} />
+                    <Label className={isLowConfidence('teamLead') ? 'text-amber-800 font-semibold' : ''}>Team Lead / Manager</Label>
+                    <Input className={getInputClassName('teamLead')} value={result.teamLead || ''} onChange={(e) => handleInputChange('teamLead', e.target.value)} />
                   </div>
                 </div>
 
@@ -485,6 +620,7 @@ export default function Home() {
                   className="h-32"
                   value={result.description || ''} 
                   onChange={(val: string) => handleInputChange('description', val)} 
+                  isLowConfidence={isLowConfidence('description')}
                 />
                 
                 <MarkdownEditor
@@ -492,6 +628,7 @@ export default function Home() {
                   className="h-32"
                   value={result.businessObjective || ''} 
                   onChange={(val: string) => handleInputChange('businessObjective', val)} 
+                  isLowConfidence={isLowConfidence('businessObjective')}
                 />
               </CardContent>
             </Card>
@@ -506,17 +643,17 @@ export default function Home() {
                   <h3 className="font-medium text-sm mb-4">Project Percentages (Approximate)</h3>
                   <div className="grid grid-cols-2 gap-8">
                     <div className="space-y-3">
-                      <Label className="text-xs text-muted-foreground">New Work vs Updating</Label>
+                      <Label className={`text-xs text-muted-foreground ${isLowConfidence('newWorkPercentage') || isLowConfidence('updatingPercentage') ? 'text-amber-800 font-semibold' : ''}`}>New Work vs Updating</Label>
                       <div className="flex items-center gap-2">
-                        <Input className="w-24" placeholder="80%" value={result.newWorkPercentage || ''} onChange={(e) => handleInputChange('newWorkPercentage', e.target.value)} /> <span className="text-sm font-medium">New</span>
-                        <Input className="w-24 ml-4" placeholder="20%" value={result.updatingPercentage || ''} onChange={(e) => handleInputChange('updatingPercentage', e.target.value)} /> <span className="text-sm font-medium">Updating</span>
+                        <Input className={`w-24 ${getInputClassName('newWorkPercentage')}`} placeholder="80%" value={result.newWorkPercentage || ''} onChange={(e) => handleInputChange('newWorkPercentage', e.target.value)} /> <span className="text-sm font-medium">New</span>
+                        <Input className={`w-24 ml-4 ${getInputClassName('updatingPercentage')}`} placeholder="20%" value={result.updatingPercentage || ''} onChange={(e) => handleInputChange('updatingPercentage', e.target.value)} /> <span className="text-sm font-medium">Updating</span>
                       </div>
                     </div>
                     <div className="space-y-3">
-                      <Label className="text-xs text-muted-foreground">Research/Learning vs Development</Label>
+                      <Label className={`text-xs text-muted-foreground ${isLowConfidence('researchLearningPercentage') || isLowConfidence('developmentPercentage') ? 'text-amber-800 font-semibold' : ''}`}>Research/Learning vs Development</Label>
                       <div className="flex items-center gap-2">
-                        <Input className="w-24" placeholder="30%" value={result.researchLearningPercentage || ''} onChange={(e) => handleInputChange('researchLearningPercentage', e.target.value)} /> <span className="text-sm font-medium">Research</span>
-                        <Input className="w-24 ml-4" placeholder="70%" value={result.developmentPercentage || ''} onChange={(e) => handleInputChange('developmentPercentage', e.target.value)} /> <span className="text-sm font-medium">Dev</span>
+                        <Input className={`w-24 ${getInputClassName('researchLearningPercentage')}`} placeholder="30%" value={result.researchLearningPercentage || ''} onChange={(e) => handleInputChange('researchLearningPercentage', e.target.value)} /> <span className="text-sm font-medium">Research</span>
+                        <Input className={`w-24 ml-4 ${getInputClassName('developmentPercentage')}`} placeholder="70%" value={result.developmentPercentage || ''} onChange={(e) => handleInputChange('developmentPercentage', e.target.value)} /> <span className="text-sm font-medium">Dev</span>
                       </div>
                     </div>
                   </div>
@@ -527,6 +664,7 @@ export default function Home() {
                   className="h-48"
                   value={result.researchedLearnings || ''} 
                   onChange={(val: string) => handleInputChange('researchedLearnings', val)} 
+                  isLowConfidence={isLowConfidence('researchedLearnings')}
                 />
 
                 <MarkdownEditor
@@ -534,11 +672,12 @@ export default function Home() {
                   className="h-64"
                   value={result.challengesSolutions || ''} 
                   onChange={(val: string) => handleInputChange('challengesSolutions', val)} 
+                  isLowConfidence={isLowConfidence('challengesSolutions')}
                 />
 
                 <div className="space-y-2">
-                  <Label>Technologies used for this work</Label>
-                  <Input placeholder="e.g. Ruby, PGS, VUE, PostgreSQL" value={result.technologiesUsed || ''} onChange={(e) => handleInputChange('technologiesUsed', e.target.value)} />
+                  <Label className={isLowConfidence('technologiesUsed') ? 'text-amber-800 font-semibold' : ''}>Technologies used for this work</Label>
+                  <Input className={getInputClassName('technologiesUsed')} placeholder="e.g. Ruby, PGS, VUE, PostgreSQL" value={result.technologiesUsed || ''} onChange={(e) => handleInputChange('technologiesUsed', e.target.value)} />
                 </div>
 
                 <MarkdownEditor
@@ -546,6 +685,7 @@ export default function Home() {
                   className="h-48"
                   value={result.codeOptimizations || ''} 
                   onChange={(val: string) => handleInputChange('codeOptimizations', val)} 
+                  isLowConfidence={isLowConfidence('codeOptimizations')}
                 />
 
                 <MarkdownEditor
@@ -554,6 +694,7 @@ export default function Home() {
                   placeholder="Modeling, simulations, trial and error (Optimizely, AB Test, etc)"
                   value={result.processesOfExperimentation || ''} 
                   onChange={(val: string) => handleInputChange('processesOfExperimentation', val)} 
+                  isLowConfidence={isLowConfidence('processesOfExperimentation')}
                 />
               </CardContent>
             </Card>
@@ -570,6 +711,7 @@ export default function Home() {
                   placeholder="e.g. customer behavior, previously undefined processes"
                   value={result.businessUncertaintiesSolved || ''} 
                   onChange={(val: string) => handleInputChange('businessUncertaintiesSolved', val)} 
+                  isLowConfidence={isLowConfidence('businessUncertaintiesSolved')}
                 />
 
                 <MarkdownEditor
@@ -578,6 +720,7 @@ export default function Home() {
                   placeholder="Spikes completed to understand solution development, POCs implemented"
                   value={result.technicalUncertaintiesSolved || ''} 
                   onChange={(val: string) => handleInputChange('technicalUncertaintiesSolved', val)} 
+                  isLowConfidence={isLowConfidence('technicalUncertaintiesSolved')}
                 />
 
                 <hr className="my-6 border-border" />
@@ -588,7 +731,7 @@ export default function Home() {
                     checked={result.isInternalUseSoftware || false}
                     onCheckedChange={(checked) => handleInputChange('isInternalUseSoftware', checked === true)}
                   />
-                  <label htmlFor="internalUse" className="text-sm font-bold leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                  <label htmlFor="internalUse" className={`text-sm font-bold leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 ${isLowConfidence('isInternalUseSoftware') ? 'text-amber-800' : ''}`}>
                     IS THIS INTERNAL USE SOFTWARE?
                   </label>
                 </div>
@@ -600,18 +743,21 @@ export default function Home() {
                       className="h-32"
                       value={result.commerciallyAvailable || ''} 
                       onChange={(val: string) => handleInputChange('commerciallyAvailable', val)} 
+                      isLowConfidence={isLowConfidence('commerciallyAvailable')}
                     />
                     <MarkdownEditor
                       label="Did the project reduce cost, improve speed and/or have any other measurable improvement?"
                       className="h-32"
                       value={result.reducedCostSpeed || ''} 
                       onChange={(val: string) => handleInputChange('reducedCostSpeed', val)} 
+                      isLowConfidence={isLowConfidence('reducedCostSpeed')}
                     />
                     <MarkdownEditor
                       label="Did the project pose a significant economic risk test?"
                       className="h-32"
                       value={result.economicRisk || ''} 
                       onChange={(val: string) => handleInputChange('economicRisk', val)} 
+                      isLowConfidence={isLowConfidence('economicRisk')}
                     />
                   </div>
                 )}

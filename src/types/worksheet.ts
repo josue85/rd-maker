@@ -23,4 +23,5 @@ export interface WorksheetData {
   commerciallyAvailable: string;
   reducedCostSpeed: string;
   economicRisk: string;
+  lowConfidenceFields?: string[];
 }
