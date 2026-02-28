@@ -3,7 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { WorksheetData } from "@/types/worksheet";
 import { getJiraClient, extractJiraKey } from "@/lib/jira";
 import { fetchJiraEpicData, JiraIssueData } from "@/lib/jira-utils";
-import { getGoogleDocsClient, extractGoogleDocId, fetchGoogleDocText } from "@/lib/google-docs";
+import { getGoogleDriveClient, getGoogleDocsClient, extractGoogleDocId, fetchGoogleDocText } from "@/lib/google-docs";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
@@ -62,11 +62,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized. Please sign in with Google." }, { status: 401 });
     }
 
-    const { jiraUrls, wikiUrls, sowUrl, brdUrl } = await req.json();
+    const { jiraUrls, wikiUrls, sowUrl, brdUrl, additionalFiles } = await req.json();
 
     let jiraContext = "No Jira data provided.";
     let sowText = "No SOW text provided.";
     let brdText = "No BRD text provided.";
+
+    const driveClient = getGoogleDriveClient(session.accessToken as string);
+    const docsClient = getGoogleDocsClient(session.accessToken as string);
 
     // Process Google Doc URL (SOW) if provided
     if (sowUrl) {
@@ -147,6 +150,7 @@ export async function POST(req: NextRequest) {
       7. The user provided an SOW URL (${sowUrl || 'None'}) and a BRD URL (${brdUrl || 'None'}). You MUST set 'sowLink' and 'brdLink' to exactly these values if provided.
       8. Extract PICs (People In Charge / Points of Contact) from the BRD text and assign them to the \`smes\` field.
       9. Project Name/Title: Extract the actual readable title of the project from the Epic Summary or the BRD/SOW headers. Do NOT just output the Epic ID (e.g., instead of "ZONKS-123", output "Customer Rebranding Project"). If both are available, combine them or use the most descriptive one.
+      10. ADDITIONAL FILES: You have also been provided with supporting documents, diagrams, and files in this prompt. Analyze these supplementary files for additional technical challenges, architectural shifts, and experimentation data. If you extract a fact from one of these files, cite it using its filename (e.g. "[Architecture_Diagram.png]").
 
       Here is the source material provided by the user:
       
@@ -175,12 +179,54 @@ export async function POST(req: NextRequest) {
         
         (Make sure there is a full blank line between the Challenge paragraph and the Solution paragraph, and another full blank line before the next Challenge begins.)
       - Experimentation (\`processesOfExperimentation\`): Add an empty line after each experimentation.
-      - Citations: When adding citations, format them as markdown links back to the source doc where the information is coming from (e.g. [JIRA-123](https://${process.env.JIRA_DOMAIN || 'your-domain.atlassian.net'}/browse/JIRA-123) or link to the SOW/BRD document if applicable).
+      - Citations: When adding citations, format them as markdown links back to the source doc where the information is coming from.
+        - For Jira: e.g. [JIRA-123](https://${process.env.JIRA_DOMAIN || 'your-domain.atlassian.net'}/browse/JIRA-123)
+        - For SOW: e.g. [SOW](${sowUrl || 'SOW'})
+        - For BRD: e.g. [BRD](${brdUrl || 'BRD'})
+        - For attached files: Mention the filename (e.g. "[Architecture_Diagram.png]")
     `;
+
+    const promptParts: any[] = [{ text: promptContext }];
+
+    if (additionalFiles && Array.isArray(additionalFiles)) {
+      for (const file of additionalFiles) {
+        try {
+          if (file.isDrive) {
+            if (file.mimeType === 'application/vnd.google-apps.document') {
+              const fileText = await fetchGoogleDocText(docsClient, file.id);
+              promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${fileText}\n--- End of ${file.name} ---\n` });
+            } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
+              const res = await driveClient.files.export({ fileId: file.id, mimeType: 'text/csv' });
+              promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${res.data}\n--- End of ${file.name} ---\n` });
+            } else if (file.mimeType === 'application/vnd.google-apps.presentation') {
+              const res = await driveClient.files.export({ fileId: file.id, mimeType: 'text/plain' });
+              promptParts.push({ text: `\n\n--- Content of attached file: ${file.name} ---\n${res.data}\n--- End of ${file.name} ---\n` });
+            } else {
+              // Try to download media (images, pdfs)
+              const res = await driveClient.files.get({ fileId: file.id, alt: 'media' }, { responseType: 'arraybuffer' });
+              const fileBase64 = Buffer.from(res.data as ArrayBuffer).toString('base64');
+              promptParts.push({ text: `\n\n--- Attached File: ${file.name} ---\n` });
+              promptParts.push({ inlineData: { data: fileBase64, mimeType: file.mimeType } });
+            }
+          } else {
+            // Local file, should have base64
+            if (file.base64) {
+              const parts = file.base64.split(',');
+              if (parts.length === 2) {
+                promptParts.push({ text: `\n\n--- Attached File: ${file.name} ---\n` });
+                promptParts.push({ inlineData: { data: parts[1], mimeType: file.mimeType } });
+              }
+            }
+          }
+        } catch (err: any) {
+          console.warn(`Failed to process additional file ${file.name}:`, err.message);
+        }
+      }
+    }
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: promptContext,
+      contents: promptParts,
       config: {
         responseMimeType: "application/json",
         responseSchema: schema,

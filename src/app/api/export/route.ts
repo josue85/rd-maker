@@ -20,8 +20,15 @@ export async function POST(req: NextRequest) {
     const driveClient = getGoogleDriveClient(session.accessToken as string);
     const docsClient = getGoogleDocsClient(session.accessToken as string);
     
-    const dateStr = new Date().toISOString().split('T')[0];
-    const newTitle = `CapEx_RnD_Worksheet_${dateStr}`;
+    // Format date as YYYYMMDD
+    const date = new Date();
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}${mm}${dd}`;
+    
+    const projName = result.projectName || result.epicLink?.split('/').pop() || 'Project';
+    const newTitle = `${projName} Research and Development Tax Credit Worksheet ${dateStr}`;
 
     const cleanMd = (text: string | undefined | null) => {
       if (!text) return 'N/A';

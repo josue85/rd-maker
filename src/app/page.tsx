@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,16 @@ import { WorksheetData } from "@/types/worksheet";
 import { useSession, signIn, signOut } from "next-auth/react";
 import ReactMarkdown from "react-markdown";
 import useDrivePicker from "react-google-drive-picker";
+import { Trash2, File as FileIcon, Image as ImageIcon, FileText } from "lucide-react";
+
+type AdditionalFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  base64?: string;
+  url?: string;
+  isDrive: boolean;
+};
 
 const MarkdownEditor = ({ value, onChange, label, className = "h-32", placeholder = "" }: any) => {
   const [mode, setMode] = useState<"preview" | "edit">("preview");
@@ -75,8 +85,69 @@ export default function Home() {
   const [sowUrl, setSowUrl] = useState("");
   const [brdUrl, setBrdUrl] = useState("");
   const [wikiUrls, setWikiUrls] = useState("");
+  const [additionalFiles, setAdditionalFiles] = useState<AdditionalFile[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [openPicker] = useDrivePicker();
+
+  const handleOpenDrivePickerMulti = () => {
+    if (!session?.accessToken) {
+      alert("Please sign in first.");
+      return;
+    }
+    openPicker({
+      clientId: "440311247922-3401s8srtbvvumphc20r0dm74n1osq9l.apps.googleusercontent.com",
+      developerKey: process.env.NEXT_PUBLIC_GOOGLE_API_KEY || "", 
+      viewId: "DOCS",
+      token: session.accessToken,
+      showUploadView: true,
+      showUploadFolders: true,
+      supportDrives: true,
+      multiselect: true,
+      callbackFunction: (data) => {
+        if (data.action === 'picked') {
+          const newFiles = data.docs.map((doc: any) => ({
+            id: doc.id,
+            name: doc.name,
+            mimeType: doc.mimeType,
+            url: doc.url,
+            isDrive: true
+          }));
+          setAdditionalFiles((prev) => [...prev, ...newFiles]);
+        }
+      },
+    });
+  };
+
+  const handleLocalFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const files = Array.from(e.target.files);
+    const newFiles = await Promise.all(
+      files.map(async (file) => {
+        return new Promise<AdditionalFile>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            resolve({
+              id: Math.random().toString(36).substring(7),
+              name: file.name,
+              mimeType: file.type,
+              base64: reader.result as string, // data URL format
+              isDrive: false,
+            });
+          };
+          reader.readAsDataURL(file);
+        });
+      })
+    );
+    setAdditionalFiles((prev) => [...prev, ...newFiles]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeFile = (id: string) => {
+    setAdditionalFiles(prev => prev.filter(f => f.id !== id));
+  };
 
   const handleOpenPicker = (setFieldUrl: (url: string) => void) => {
     if (!session?.accessToken) {
@@ -111,6 +182,7 @@ export default function Home() {
       wikiUrls,
       sowUrl,
       brdUrl,
+      additionalFiles,
     };
 
     try {
@@ -296,6 +368,55 @@ export default function Home() {
                       placeholder="https://wiki.enova.com/pages/viewpage.action?pageId=..."
                       className="border-input focus:border-primary focus:ring-primary/20"
                     />
+                  </div>
+
+                  <div className="space-y-4 pt-4 border-t border-border">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-semibold text-gray-700">Additional Context & Supporting Files (Optional)</Label>
+                      <p className="text-xs text-muted-foreground">Upload or link architecture diagrams, flow charts, or spreadsheets. The AI will read them directly to extract extra technical challenges and insights.</p>
+                    </div>
+                    
+                    <div className="flex gap-4">
+                      <Button type="button" variant="outline" onClick={handleOpenDrivePickerMulti} className="flex-1 bg-white hover:bg-slate-50 border-dashed border-2 border-slate-300">
+                        <FileText className="w-4 h-4 mr-2 text-primary" />
+                        Select from Google Drive
+                      </Button>
+                      
+                      <div className="flex-1 relative">
+                        <input
+                          type="file"
+                          multiple
+                          ref={fileInputRef}
+                          onChange={handleLocalFileUpload}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          accept="image/*,application/pdf,.csv,.txt"
+                        />
+                        <Button type="button" variant="outline" className="w-full bg-white hover:bg-slate-50 border-dashed border-2 border-slate-300 pointer-events-none">
+                          <FileIcon className="w-4 h-4 mr-2 text-primary" />
+                          Upload Local Files
+                        </Button>
+                      </div>
+                    </div>
+
+                    {additionalFiles.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Attached Files ({additionalFiles.length})</p>
+                        <ul className="space-y-2">
+                          {additionalFiles.map((f) => (
+                            <li key={f.id} className="flex items-center justify-between p-2 text-sm bg-white border border-border rounded-md shadow-sm">
+                              <div className="flex items-center overflow-hidden">
+                                {f.mimeType.startsWith('image') ? <ImageIcon className="w-4 h-4 text-blue-500 mr-2 flex-shrink-0" /> : <FileText className="w-4 h-4 text-slate-500 mr-2 flex-shrink-0" />}
+                                <span className="truncate max-w-[200px] sm:max-w-[300px]">{f.name}</span>
+                                {f.isDrive && <span className="ml-2 text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">Drive</span>}
+                              </div>
+                              <button type="button" onClick={() => removeFile(f.id)} className="text-slate-400 hover:text-red-500 p-1">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-4">
