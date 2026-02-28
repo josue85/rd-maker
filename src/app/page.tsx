@@ -287,6 +287,19 @@ export default function Home() {
         body: JSON.stringify(data),
       });
 
+      if (response.status === 401) {
+         toast.error("Session Expired", { 
+           description: "Your Google session has expired. Please sign in again.",
+           action: {
+             label: "Sign In",
+             onClick: () => signIn('google')
+           },
+           duration: 8000
+         });
+         setLoading(false);
+         return;
+      }
+
       if (!response.ok) {
         throw new Error("Failed to extract data");
       }
@@ -358,6 +371,19 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ result, templateDocUrl: "" }), // Template is hardcoded in the backend for now
       });
+
+      if (response.status === 401) {
+         toast.error("Session Expired", { 
+           description: "Your Google session has expired. Please sign in again to export.",
+           action: {
+             label: "Sign In",
+             onClick: () => signIn('google')
+           },
+           duration: 8000
+         });
+         setExporting(false);
+         return;
+      }
 
       if (!response.ok) {
         const errorData = await response.json();
