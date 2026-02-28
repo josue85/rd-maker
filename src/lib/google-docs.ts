@@ -59,7 +59,7 @@ function unescapeHtml(text: string): string {
     .replace(/&#39;/g, "'");
 }
 
-function markdownToDocsRequests(markdown: string, startIndex: number) {
+export function markdownToDocsRequests(markdown: string, startIndex: number) {
   const requests: any[] = [];
   const textSegments: any[] = [];
   const tokens = marked.lexer(markdown);
