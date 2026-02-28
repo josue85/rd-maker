@@ -1,4 +1,5 @@
 export interface WorksheetData {
+  projectName?: string;
   wikiLink: string;
   epicLink: string;
   sowLink: string;

@@ -12,6 +12,12 @@ export interface JiraIssueData {
     summary: string;
     status: string;
   }[];
+  linkedIssues?: {
+    key: string;
+    summary: string;
+    status: string;
+    description?: string;
+  }[];
 }
 
 export async function fetchJiraEpicData(
@@ -20,6 +26,39 @@ export async function fetchJiraEpicData(
 ): Promise<JiraIssueData> {
   try {
     const issue = await jiraClient.findIssue(issueKey);
+    let linkedIssues: any[] = [];
+    
+    // Attempt to fetch child issues of this Epic using the Jira Agile API
+    try {
+       const domain = process.env.JIRA_DOMAIN?.replace(/^https?:\/\//, "").replace(/\/$/, "") || '';
+       const email = process.env.JIRA_EMAIL || '';
+       const token = process.env.JIRA_API_TOKEN || '';
+       const auth = Buffer.from(`${email}:${token}`).toString('base64');
+       
+       const searchRes = await fetch(`https://${domain}/rest/agile/1.0/epic/${issueKey}/issue`, {
+         method: 'GET',
+         headers: {
+           'Authorization': `Basic ${auth}`,
+           'Accept': 'application/json'
+         }
+       });
+       
+       if (searchRes.ok) {
+           const searchResult = await searchRes.json();
+           if (searchResult && searchResult.issues) {
+               linkedIssues = searchResult.issues.map((i: any) => ({
+                   key: i.key,
+                   summary: i.fields.summary || "",
+                   status: i.fields.status?.name || "",
+                   description: i.fields.description || "",
+               }));
+           }
+       } else {
+           console.warn(`Could not fetch agile epic issues for ${issueKey}: HTTP ${searchRes.status}`);
+       }
+    } catch (searchErr) {
+       console.warn(`Error fetching linked issues via Agile API for ${issueKey}:`, searchErr);
+    }
 
     return {
       key: issue.key,
@@ -35,6 +74,7 @@ export async function fetchJiraEpicData(
         summary: st.fields.summary,
         status: st.fields.status?.name,
       })) || [],
+      linkedIssues,
     };
   } catch (error) {
     console.error(`Error fetching Jira Issue ${issueKey}:`, error);

@@ -26,25 +26,21 @@ export async function POST(req: NextRequest) {
     const cleanMd = (text: string | undefined | null) => {
       if (!text) return 'N/A';
       
-      // Convert Markdown links [Text](url) to "Text (url)" so links aren't lost
-      let clean = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
-      
-      // Remove bold/italic markdown indicators
-      clean = clean.replace(/\*\*/g, '').replace(/\*/g, '');
-      
-      // Convert raw markdown bullets to a nice text bullet character
-      clean = clean.replace(/^-\s+/gm, '• ');
-      
-      return clean.trim() || 'N/A';
+      return text.trim() || 'N/A';
+    };
+
+    const formatLink = (url: string | undefined | null, text: string) => {
+      if (!url || url === 'N/A') return 'N/A';
+      return url.trim().startsWith('http') ? `[${text}](${url.trim()})` : url.trim();
     };
 
     // Map our state data to the placeholders in the document
     const replacements = {
-      'Project Name': result.epicLink ? result.epicLink.split('/').pop() || 'Project' : 'Project',
-      'Wiki Link': result.wikiLink || 'N/A',
-      'Epic Link': result.epicLink || 'N/A',
-      'SoW Link': result.sowLink || 'N/A',
-      'BRD Link': result.brdLink || 'N/A',
+      'Project Name': result.projectName || result.epicLink?.split('/').pop() || 'Project',
+      'Wiki Link': formatLink(result.wikiLink, 'Wiki'),
+      'Epic Link': formatLink(result.epicLink, 'Epic'),
+      'SoW Link': formatLink(result.sowLink, 'Statement of Work'),
+      'BRD Link': formatLink(result.brdLink, 'BRD'),
       'Tech PIC': result.smes || 'N/A',
       'PM or Product Manger': 'N/A', // Could add this to UI later
       'SE manager': result.teamLead || 'N/A',
@@ -54,7 +50,7 @@ export async function POST(req: NextRequest) {
       // Fixed the missing mapping tags!
       'New Work vs Updating': `New: ${result.newWorkPercentage || '0%'}, Updating: ${result.updatingPercentage || '0%'}`,
       'Research and Learning vs Development': `Research/Learning: ${result.researchLearningPercentage || '0%'}, Development: ${result.developmentPercentage || '0%'}`,
-      'Researched and new learnings': cleanMd(result.researchedLearnings),
+      'What kind of things were researched and/or new learnings': cleanMd(result.researchedLearnings),
       'Challenges': cleanMd(result.challengesSolutions),
       'Technologies': cleanMd(result.technologiesUsed),
 

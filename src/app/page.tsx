@@ -3,29 +3,114 @@
 import { useState } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { WorksheetData } from "@/types/worksheet";
 import { useSession, signIn, signOut } from "next-auth/react";
+import ReactMarkdown from "react-markdown";
+import useDrivePicker from "react-google-drive-picker";
+
+const MarkdownEditor = ({ value, onChange, label, className = "h-32", placeholder = "" }: any) => {
+  const [mode, setMode] = useState<"preview" | "edit">("preview");
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between items-center">
+        <Label>{label}</Label>
+        <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-md border border-border">
+          <button 
+            type="button"
+            onClick={() => setMode("preview")} 
+            className={`text-xs px-3 py-1 rounded-sm transition-colors ${mode === "preview" ? "bg-white shadow-sm font-semibold text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Preview
+          </button>
+          <button 
+            type="button"
+            onClick={() => setMode("edit")} 
+            className={`text-xs px-3 py-1 rounded-sm transition-colors ${mode === "edit" ? "bg-white shadow-sm font-semibold text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Raw Edit
+          </button>
+        </div>
+      </div>
+      {mode === "preview" ? (
+        <div className={`p-4 border border-input rounded-md bg-white overflow-y-auto min-h-[8rem] max-h-[30rem] ${className.replace('h-', 'min-h-')}`}>
+          {value ? (
+              <ReactMarkdown 
+              components={{
+                ul: ({node, ...props}) => <ul className="list-disc pl-6 space-y-3 mb-6 mt-2" {...props} />,
+                ol: ({node, ...props}) => <ol className="list-decimal pl-6 space-y-3 mb-6 mt-2" {...props} />,
+                p: ({node, ...props}) => <p className="mb-4 last:mb-0 leading-relaxed" {...props} />,
+                a: ({node, ...props}) => <a className="text-primary hover:underline font-medium" target="_blank" rel="noopener noreferrer" {...props} />,
+                h1: ({node, ...props}) => <h1 className="text-xl font-bold mb-4 mt-8" {...props} />,
+                h2: ({node, ...props}) => <h2 className="text-lg font-bold mb-3 mt-6" {...props} />,
+                h3: ({node, ...props}) => <h3 className="text-md font-bold mb-2 mt-5" {...props} />,
+                li: ({node, ...props}) => <li className="pl-1 marker:text-muted-foreground" {...props} />,
+                strong: ({node, ...props}) => <strong className="font-semibold text-gray-900" {...props} />,
+              }}
+            >
+              {value}
+            </ReactMarkdown>
+          ) : (
+            <span className="text-muted-foreground italic">No content...</span>
+          )}
+        </div>
+      ) : (
+        <Textarea className={`font-mono text-sm ${className}`} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+      )}
+    </div>
+  );
+};
 
 export default function Home() {
   const { data: session, status } = useSession();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<WorksheetData | null>(null);
 
+  // Form states for Picker population
+  const [jiraUrls, setJiraUrls] = useState("");
+  const [sowUrl, setSowUrl] = useState("");
+  const [brdUrl, setBrdUrl] = useState("");
+  const [wikiUrls, setWikiUrls] = useState("");
+
+  const [openPicker] = useDrivePicker();
+
+  const handleOpenPicker = (setFieldUrl: (url: string) => void) => {
+    if (!session?.accessToken) {
+      alert("Please sign in first.");
+      return;
+    }
+    openPicker({
+      // We extract client ID from standard env vars usually, hardcoded fallback for the picker component to function.
+      clientId: "440311247922-3401s8srtbvvumphc20r0dm74n1osq9l.apps.googleusercontent.com",
+      developerKey: process.env.NEXT_PUBLIC_GOOGLE_API_KEY || "", 
+      viewId: "DOCS",
+      token: session.accessToken,
+      showUploadView: true,
+      showUploadFolders: true,
+      supportDrives: true,
+      multiselect: false,
+      callbackFunction: (data) => {
+        if (data.action === 'picked') {
+          const file = data.docs[0];
+          setFieldUrl(file.url);
+        }
+      },
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
 
-    const formData = new FormData(e.currentTarget);
     const data = {
-      jiraUrls: formData.get("jiraUrls") as string,
-      wikiUrls: formData.get("wikiUrls") as string,
-      sowUrl: formData.get("sowUrl") as string,
-      brdUrl: formData.get("brdUrl") as string,
+      jiraUrls,
+      wikiUrls,
+      sowUrl,
+      brdUrl,
     };
 
     try {
@@ -75,7 +160,6 @@ export default function Home() {
       const { url } = await response.json();
       const newWindow = window.open(url, "_blank");
       if (!newWindow) {
-        // Fallback if popup blocker prevented the new window
         window.location.assign(url);
       }
     } catch (error) {
@@ -161,7 +245,8 @@ export default function Home() {
                     <Label htmlFor="jiraUrls" className="text-sm font-semibold text-gray-700">Jira Epic URL(s) *</Label>
                     <Input
                       id="jiraUrls"
-                      name="jiraUrls"
+                      value={jiraUrls}
+                      onChange={(e) => setJiraUrls(e.target.value)}
                       placeholder="https://enova.atlassian.net/browse/EPIC-123"
                       className="border-input focus:border-primary focus:ring-primary/20"
                       required
@@ -171,22 +256,34 @@ export default function Home() {
 
                   <div className="space-y-2">
                     <Label htmlFor="sowUrl" className="text-sm font-semibold text-gray-700">Google Doc Link (SOW)</Label>
-                    <Input
-                      id="sowUrl"
-                      name="sowUrl"
-                      placeholder="https://docs.google.com/document/d/1Tn5_..."
-                      className="border-input focus:border-primary focus:ring-primary/20"
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        id="sowUrl"
+                        value={sowUrl}
+                        onChange={(e) => setSowUrl(e.target.value)}
+                        placeholder="https://docs.google.com/document/d/..."
+                        className="border-input focus:border-primary focus:ring-primary/20 flex-1"
+                      />
+                      <Button type="button" variant="outline" onClick={() => handleOpenPicker(setSowUrl)}>
+                        Select File
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="brdUrl" className="text-sm font-semibold text-gray-700">Google Doc Link (BRD)</Label>
-                    <Input
-                      id="brdUrl"
-                      name="brdUrl"
-                      placeholder="https://docs.google.com/document/d/1Tn5_..."
-                      className="border-input focus:border-primary focus:ring-primary/20"
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        id="brdUrl"
+                        value={brdUrl}
+                        onChange={(e) => setBrdUrl(e.target.value)}
+                        placeholder="https://docs.google.com/document/d/..."
+                        className="border-input focus:border-primary focus:ring-primary/20 flex-1"
+                      />
+                      <Button type="button" variant="outline" onClick={() => handleOpenPicker(setBrdUrl)}>
+                        Select File
+                      </Button>
+                    </div>
                     <p className="text-xs text-muted-foreground">Make sure you have Viewer access to these documents.</p>
                   </div>
 
@@ -194,7 +291,8 @@ export default function Home() {
                     <Label htmlFor="wikiUrls" className="text-sm font-semibold text-gray-700">Wiki Project URL(s)</Label>
                     <Input
                       id="wikiUrls"
-                      name="wikiUrls"
+                      value={wikiUrls}
+                      onChange={(e) => setWikiUrls(e.target.value)}
                       placeholder="https://wiki.enova.com/pages/viewpage.action?pageId=..."
                       className="border-input focus:border-primary focus:ring-primary/20"
                     />
@@ -233,8 +331,8 @@ export default function Home() {
               <CardHeader className="bg-muted/30 border-b border-border pb-4">
                 <CardTitle className="text-lg text-[#333333]">Project Information</CardTitle>
               </CardHeader>
-              <CardContent className="pt-6 space-y-5">
-                <div className="grid grid-cols-2 gap-4">
+              <CardContent className="pt-6 space-y-8">
+                <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <Label>Wiki Link</Label>
                     <Input value={result.wikiLink || ''} onChange={(e) => handleInputChange('wikiLink', e.target.value)} />
@@ -261,14 +359,19 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="space-y-2 pt-2">
-                  <Label>Description of Project</Label>
-                  <Textarea className="h-32" value={result.description || ''} onChange={(e) => handleInputChange('description', e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Business Objective</Label>
-                  <Textarea className="h-24" value={result.businessObjective || ''} onChange={(e) => handleInputChange('businessObjective', e.target.value)} />
-                </div>
+                <MarkdownEditor
+                  label="Description of Project"
+                  className="h-32"
+                  value={result.description || ''} 
+                  onChange={(val: string) => handleInputChange('description', val)} 
+                />
+                
+                <MarkdownEditor
+                  label="Business Objective"
+                  className="h-32"
+                  value={result.businessObjective || ''} 
+                  onChange={(val: string) => handleInputChange('businessObjective', val)} 
+                />
               </CardContent>
             </Card>
 
@@ -276,7 +379,7 @@ export default function Home() {
               <CardHeader className="bg-muted/30 border-b border-border pb-4">
                 <CardTitle className="text-lg text-[#333333]">R&D Information</CardTitle>
               </CardHeader>
-              <CardContent className="pt-6 space-y-6">
+              <CardContent className="pt-6 space-y-8">
                 
                 <div className="bg-slate-50 p-4 rounded-md border border-slate-200">
                   <h3 className="font-medium text-sm mb-4">Project Percentages (Approximate)</h3>
@@ -284,44 +387,53 @@ export default function Home() {
                     <div className="space-y-3">
                       <Label className="text-xs text-muted-foreground">New Work vs Updating</Label>
                       <div className="flex items-center gap-2">
-                        <Input className="w-24" placeholder="80%" value={result.newWorkPercentage || ''} onChange={(e) => handleInputChange('newWorkPercentage', e.target.value)} /> <span className="text-sm">New</span>
-                        <Input className="w-24 ml-4" placeholder="20%" value={result.updatingPercentage || ''} onChange={(e) => handleInputChange('updatingPercentage', e.target.value)} /> <span className="text-sm">Updating</span>
+                        <Input className="w-24" placeholder="80%" value={result.newWorkPercentage || ''} onChange={(e) => handleInputChange('newWorkPercentage', e.target.value)} /> <span className="text-sm font-medium">New</span>
+                        <Input className="w-24 ml-4" placeholder="20%" value={result.updatingPercentage || ''} onChange={(e) => handleInputChange('updatingPercentage', e.target.value)} /> <span className="text-sm font-medium">Updating</span>
                       </div>
                     </div>
                     <div className="space-y-3">
                       <Label className="text-xs text-muted-foreground">Research/Learning vs Development</Label>
                       <div className="flex items-center gap-2">
-                        <Input className="w-24" placeholder="30%" value={result.researchLearningPercentage || ''} onChange={(e) => handleInputChange('researchLearningPercentage', e.target.value)} /> <span className="text-sm">Research</span>
-                        <Input className="w-24 ml-4" placeholder="70%" value={result.developmentPercentage || ''} onChange={(e) => handleInputChange('developmentPercentage', e.target.value)} /> <span className="text-sm">Dev</span>
+                        <Input className="w-24" placeholder="30%" value={result.researchLearningPercentage || ''} onChange={(e) => handleInputChange('researchLearningPercentage', e.target.value)} /> <span className="text-sm font-medium">Research</span>
+                        <Input className="w-24 ml-4" placeholder="70%" value={result.developmentPercentage || ''} onChange={(e) => handleInputChange('developmentPercentage', e.target.value)} /> <span className="text-sm font-medium">Dev</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>What kind of things were researched and/or new learnings?</Label>
-                  <Textarea className="h-24" value={result.researchedLearnings || ''} onChange={(e) => handleInputChange('researchedLearnings', e.target.value)} />
-                </div>
+                <MarkdownEditor
+                  label="What kind of things were researched and/or new learnings?"
+                  className="h-48"
+                  value={result.researchedLearnings || ''} 
+                  onChange={(val: string) => handleInputChange('researchedLearnings', val)} 
+                />
 
-                <div className="space-y-2">
-                  <Label>Challenges faced and solutions used to overcome them</Label>
-                  <Textarea className="h-32" value={result.challengesSolutions || ''} onChange={(e) => handleInputChange('challengesSolutions', e.target.value)} />
-                </div>
+                <MarkdownEditor
+                  label="Challenges faced and solutions used to overcome them"
+                  className="h-64"
+                  value={result.challengesSolutions || ''} 
+                  onChange={(val: string) => handleInputChange('challengesSolutions', val)} 
+                />
 
                 <div className="space-y-2">
                   <Label>Technologies used for this work</Label>
                   <Input placeholder="e.g. Ruby, PGS, VUE, PostgreSQL" value={result.technologiesUsed || ''} onChange={(e) => handleInputChange('technologiesUsed', e.target.value)} />
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Code optimizations done for this epic</Label>
-                  <Textarea className="h-24" value={result.codeOptimizations || ''} onChange={(e) => handleInputChange('codeOptimizations', e.target.value)} />
-                </div>
+                <MarkdownEditor
+                  label="Code optimizations done for this epic"
+                  className="h-48"
+                  value={result.codeOptimizations || ''} 
+                  onChange={(val: string) => handleInputChange('codeOptimizations', val)} 
+                />
 
-                <div className="space-y-2">
-                  <Label>Processes of experimentation done for this epic</Label>
-                  <Textarea className="h-24" placeholder="Modeling, simulations, trial and error (Optimizely, AB Test, etc)" value={result.processesOfExperimentation || ''} onChange={(e) => handleInputChange('processesOfExperimentation', e.target.value)} />
-                </div>
+                <MarkdownEditor
+                  label="Processes of experimentation done for this epic"
+                  className="h-48"
+                  placeholder="Modeling, simulations, trial and error (Optimizely, AB Test, etc)"
+                  value={result.processesOfExperimentation || ''} 
+                  onChange={(val: string) => handleInputChange('processesOfExperimentation', val)} 
+                />
               </CardContent>
             </Card>
 
@@ -329,19 +441,25 @@ export default function Home() {
               <CardHeader className="bg-muted/30 border-b border-border pb-4">
                 <CardTitle className="text-lg text-[#333333]">Elimination of Uncertainty & Internal Use</CardTitle>
               </CardHeader>
-              <CardContent className="pt-6 space-y-6">
+              <CardContent className="pt-6 space-y-8">
                 
-                <div className="space-y-2">
-                  <Label>What business uncertainties were solved during this work?</Label>
-                  <Textarea className="h-24" placeholder="e.g. customer behavior, previously undefined processes" value={result.businessUncertaintiesSolved || ''} onChange={(e) => handleInputChange('businessUncertaintiesSolved', e.target.value)} />
-                </div>
+                <MarkdownEditor
+                  label="What business uncertainties were solved during this work?"
+                  className="h-48"
+                  placeholder="e.g. customer behavior, previously undefined processes"
+                  value={result.businessUncertaintiesSolved || ''} 
+                  onChange={(val: string) => handleInputChange('businessUncertaintiesSolved', val)} 
+                />
 
-                <div className="space-y-2">
-                  <Label>What technical or solutioning uncertainty did we have and how did we overcome it?</Label>
-                  <Textarea className="h-24" placeholder="Spikes completed to understand solution development, POCs implemented" value={result.technicalUncertaintiesSolved || ''} onChange={(e) => handleInputChange('technicalUncertaintiesSolved', e.target.value)} />
-                </div>
+                <MarkdownEditor
+                  label="What technical or solutioning uncertainty did we have and how did we overcome it?"
+                  className="h-48"
+                  placeholder="Spikes completed to understand solution development, POCs implemented"
+                  value={result.technicalUncertaintiesSolved || ''} 
+                  onChange={(val: string) => handleInputChange('technicalUncertaintiesSolved', val)} 
+                />
 
-                <hr className="my-4" />
+                <hr className="my-6 border-border" />
 
                 <div className="flex items-center space-x-2 bg-slate-50 p-4 rounded-md border border-slate-200">
                   <Checkbox 
@@ -355,26 +473,32 @@ export default function Home() {
                 </div>
 
                 {result.isInternalUseSoftware && (
-                  <div className="space-y-4 pl-6 border-l-2 border-primary ml-2 py-2">
-                    <div className="space-y-2">
-                      <Label>Is this component commercially available?</Label>
-                      <Textarea value={result.commerciallyAvailable || ''} onChange={(e) => handleInputChange('commerciallyAvailable', e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Did the project reduce cost, improve speed and/or have any other measurable improvement?</Label>
-                      <Textarea value={result.reducedCostSpeed || ''} onChange={(e) => handleInputChange('reducedCostSpeed', e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Did the project pose a significant economic risk test?</Label>
-                      <Textarea value={result.economicRisk || ''} onChange={(e) => handleInputChange('economicRisk', e.target.value)} />
-                    </div>
+                  <div className="space-y-6 pl-6 border-l-2 border-primary ml-2 py-2">
+                    <MarkdownEditor
+                      label="Is this component commercially available?"
+                      className="h-32"
+                      value={result.commerciallyAvailable || ''} 
+                      onChange={(val: string) => handleInputChange('commerciallyAvailable', val)} 
+                    />
+                    <MarkdownEditor
+                      label="Did the project reduce cost, improve speed and/or have any other measurable improvement?"
+                      className="h-32"
+                      value={result.reducedCostSpeed || ''} 
+                      onChange={(val: string) => handleInputChange('reducedCostSpeed', val)} 
+                    />
+                    <MarkdownEditor
+                      label="Did the project pose a significant economic risk test?"
+                      className="h-32"
+                      value={result.economicRisk || ''} 
+                      onChange={(val: string) => handleInputChange('economicRisk', val)} 
+                    />
                   </div>
                 )}
               </CardContent>
             </Card>
 
             <div className="flex justify-end pt-4 pb-12">
-               <Button onClick={handleExport} disabled={exporting} size="lg" className="bg-[#95ca53] hover:bg-[#86b54a] text-white shadow-md text-lg px-8">
+               <Button onClick={handleExport} disabled={exporting} size="lg" className="bg-[#95ca53] hover:bg-[#86b54a] text-white shadow-md text-lg px-8 py-6 h-auto">
                   {exporting ? "Exporting..." : "Export Final to Google Doc"}
                </Button>
             </div>
