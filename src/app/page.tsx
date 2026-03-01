@@ -177,6 +177,21 @@ export default function Home() {
     }
   }, [result, jiraUrls, sowUrl, brdUrl, wikiUrls]);
 
+  useEffect(() => {
+    if ((session as any)?.error === "RefreshAccessTokenError") {
+      toast.error("Session Expired", { 
+        description: "Your Google session has expired and could not be automatically refreshed. Please sign in again.",
+        action: {
+          label: "Sign In",
+          onClick: () => signIn('google')
+        },
+        duration: 10000
+      });
+      // Optionally sign the user out completely so they don't stay in a broken state
+      signOut({ redirect: false });
+    }
+  }, [session]);
+
   const clearDraft = () => {
      setResult(null);
      localStorage.removeItem("rdmaker_draft");
