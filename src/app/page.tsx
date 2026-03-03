@@ -114,7 +114,7 @@ const MarkdownEditor = ({ value, onChange, label, className = "h-32", placeholde
                 strong: ({node, ...props}) => <strong className="font-semibold text-gray-900" {...props} />,
               }}
             >
-              {value}
+              {typeof value === 'string' ? value.replace(/\\n/g, '\n') : value}
             </ReactMarkdown>
           ) : (
             <span className="text-muted-foreground italic">No content...</span>

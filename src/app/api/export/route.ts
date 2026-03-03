@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
     const newTitle = `${projName} Research and Development Tax Credit Worksheet ${dateStr}`;
 
     const cleanMd = (text: string | undefined | null) => {
+      if (typeof text === 'string') text = text.replace(/\\n/g, '\n');
       if (!text) return 'N/A';
       
       return text.trim() || 'N/A';
