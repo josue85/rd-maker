@@ -11,12 +11,14 @@ export interface JiraIssueData {
     key: string;
     summary: string;
     status: string;
+    assignee?: string | null;
   }[];
   linkedIssues?: {
     key: string;
     summary: string;
     status: string;
     description?: string;
+    assignee?: string | null;
   }[];
 }
 
@@ -51,6 +53,7 @@ export async function fetchJiraEpicData(
                    summary: i.fields.summary || "",
                    status: i.fields.status?.name || "",
                    description: i.fields.description || "",
+                   assignee: i.fields.assignee?.displayName || null,
                }));
            }
        } else {
@@ -73,6 +76,7 @@ export async function fetchJiraEpicData(
         key: st.key,
         summary: st.fields.summary,
         status: st.fields.status?.name,
+        assignee: st.fields.assignee?.displayName || null,
       })) || [],
       linkedIssues,
     };
