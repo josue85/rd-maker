@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
           if (wikiUrls && process.env.CONFLUENCE_PAT) {
             sendUpdate("Reading Confluence Wiki...");
             try {
-              const urls = wikiUrls.split(',').map((u: string) => u.trim());
+              const urls = wikiUrls.split(/[,\n]+/).map((u: string) => u.trim()).filter(Boolean);
               let combinedWikiText = "";
               for (const url of urls) {
                 if (url) {
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
             sendUpdate("Fetching Jira Epic & Stories...");
             try {
               const jiraClient = getJiraClient();
-              const urls = jiraUrls.split(',').map((u: string) => u.trim());
+              const urls = jiraUrls.split(/[,\n]+/).map((u: string) => u.trim()).filter(Boolean);
               const issuesData: JiraIssueData[] = [];
 
               for (const url of urls) {

@@ -491,15 +491,15 @@ export default function Home() {
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div className="space-y-2">
                     <Label htmlFor="jiraUrls" className="text-sm font-semibold text-gray-700">Jira Epic URL(s) *</Label>
-                    <Input
+                    <Textarea
                       id="jiraUrls"
                       value={jiraUrls}
                       onChange={(e) => setJiraUrls(e.target.value)}
-                      placeholder="https://enova.atlassian.net/browse/EPIC-123"
-                      className="border-input focus:border-primary focus:ring-primary/20"
+                      placeholder="https://enova.atlassian.net/browse/EPIC-123, https://enova.atlassian.net/browse/EPIC-456"
+                      className="border-input focus:border-primary focus:ring-primary/20 min-h-[80px]"
                       required
                     />
-                    <p className="text-xs text-muted-foreground">The system will automatically fetch the epic description and all linked subtasks.</p>
+                    <p className="text-xs text-muted-foreground">The system will automatically fetch the epic descriptions and all linked subtasks. You can separate multiple epics with commas or newlines.</p>
                   </div>
 
                   <div className="space-y-2">
@@ -537,13 +537,14 @@ export default function Home() {
 
                   <div className="space-y-2">
                     <Label htmlFor="wikiUrls" className="text-sm font-semibold text-gray-700">Wiki Project URL(s)</Label>
-                    <Input
+                    <Textarea
                       id="wikiUrls"
                       value={wikiUrls}
                       onChange={(e) => setWikiUrls(e.target.value)}
-                      placeholder="https://wiki.enova.com/pages/viewpage.action?pageId=..."
-                      className="border-input focus:border-primary focus:ring-primary/20"
+                      placeholder="https://wiki.enova.com/pages/viewpage.action?pageId=123&#10;https://wiki.enova.com/pages/viewpage.action?pageId=456"
+                      className="border-input focus:border-primary focus:ring-primary/20 min-h-[60px]"
                     />
+                    <p className="text-xs text-muted-foreground">Separate multiple wiki pages with commas or newlines.</p>
                   </div>
 
                   <div className="space-y-4 pt-4 border-t border-border">
