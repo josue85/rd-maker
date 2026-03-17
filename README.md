@@ -1,5 +1,26 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Environment Variables
+
+To run this application locally, you will need to create a `.env.local` file in the root of the project with the following environment variables:
+
+### Authentication (NextAuth & Google OAuth)
+*   **`NEXTAUTH_SECRET`**: A random string used to hash tokens, sign/encrypt cookies, and generate cryptographic keys within NextAuth.js.
+*   **`GOOGLE_CLIENT_ID`**: The OAuth Client ID from your Google Cloud Console. Used to authenticate users so they can log in.
+*   **`GOOGLE_CLIENT_SECRET`**: The OAuth Client Secret from your Google Cloud Console. Pairs with the Client ID to authorize the application.
+
+### Google APIs & AI
+*   **`GEMINI_API_KEY`**: Your API key from Google AI Studio. This is required for the application to use the Gemini model (`@google/genai`) to parse and extract requirements from the source texts.
+*   **`NEXT_PUBLIC_GOOGLE_API_KEY`**: (Optional/Client-Side) Your public Google API key. Used by the Google Drive Picker component on the frontend to allow users to select SOWs and BRDs from their Google Drive.
+
+### Atlassian Integrations (Jira & Confluence)
+*   **`JIRA_DOMAIN`**: The base domain for your Jira instance (e.g., `enova.atlassian.net` or `https://enova.atlassian.net`).
+*   **`JIRA_EMAIL`**: The email address of the service account or user that will be used to authenticate with the Jira API.
+*   **`JIRA_API_TOKEN`**: The API token generated from your Atlassian account settings. Used to authenticate API requests to fetch Epic and Subtask data.
+*   **`CONFLUENCE_PAT`**: A Personal Access Token for Confluence. Used to scrape Wiki page contents to provide additional context to the AI model.
+
+---
+
 ## Getting Started
 First, install dependancies
 ```bash
